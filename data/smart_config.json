@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "interval_minutes": 30,
+  "min_growth_score": 75,
+  "min_entry_score": 55,
+  "extra_symbols": [],
+  "notify_seen": []
+}

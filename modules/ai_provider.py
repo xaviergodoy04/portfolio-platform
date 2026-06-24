@@ -1,0 +1,141 @@
+"""
+AI Provider — capa de abstracción para múltiples proveedores de LLM.
+
+Soporta:
+  - groq:      Modelos open source (Llama, Qwen) via Groq Cloud (gratis)
+  - anthropic: Claude via Anthropic API (pago)
+  - auto:      Intenta Groq primero, fallback a Anthropic
+"""
+
+import json
+import httpx
+import anthropic
+
+
+class AIProvider:
+    def __init__(self, provider: str, groq_api_key: str = "",
+                 groq_model_analysis: str = "", groq_model_fast: str = "",
+                 anthropic_api_key: str = "", anthropic_model: str = ""):
+        self.provider = provider
+        self.groq_api_key = groq_api_key
+        self.groq_model_analysis = groq_model_analysis
+        self.groq_model_fast = groq_model_fast
+        self.anthropic_api_key = anthropic_api_key
+        self.anthropic_model = anthropic_model
+        self._groq_base = "https://api.groq.com/openai/v1"
+
+    def _groq_available(self) -> bool:
+        return bool(self.groq_api_key and self.groq_api_key != "TU_GROQ_API_KEY_AQUI")
+
+    def _anthropic_available(self) -> bool:
+        return bool(self.anthropic_api_key and self.anthropic_api_key != "TU_ANTHROPIC_API_KEY_AQUI")
+
+    def _resolve_provider(self) -> str:
+        if self.provider == "auto":
+            if self._groq_available():
+                return "groq"
+            if self._anthropic_available():
+                return "anthropic"
+            return "none"
+        return self.provider
+
+    def generate(self, prompt: str, system_prompt: str = "",
+                 max_tokens: int = 1024, tier: str = "analysis") -> str:
+        provider = self._resolve_provider()
+
+        if provider == "groq":
+            return self._call_groq(prompt, system_prompt, max_tokens, tier)
+        elif provider == "anthropic":
+            return self._call_anthropic(prompt, system_prompt, max_tokens)
+        else:
+            raise RuntimeError("No hay proveedor de IA configurado. "
+                               "Configurá GROQ_API_KEY o ANTHROPIC_API_KEY en config.py")
+
+    def generate_with_fallback(self, prompt: str, system_prompt: str = "",
+                               max_tokens: int = 1024, tier: str = "analysis") -> tuple[str, str]:
+        """Genera texto, con fallback automático. Retorna (respuesta, proveedor_usado)."""
+        provider = self._resolve_provider()
+
+        if provider == "groq":
+            try:
+                result = self._call_groq(prompt, system_prompt, max_tokens, tier)
+                return result, "groq"
+            except Exception:
+                if self._anthropic_available():
+                    result = self._call_anthropic(prompt, system_prompt, max_tokens)
+                    return result, "anthropic"
+                raise
+
+        if provider == "anthropic":
+            result = self._call_anthropic(prompt, system_prompt, max_tokens)
+            return result, "anthropic"
+
+        raise RuntimeError("No hay proveedor de IA configurado.")
+
+    def _call_groq(self, prompt: str, system_prompt: str,
+                   max_tokens: int, tier: str) -> str:
+        model = self.groq_model_analysis if tier == "analysis" else self.groq_model_fast
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        response = httpx.post(
+            f"{self._groq_base}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.groq_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": 0.3,
+            },
+            timeout=120.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+
+    def _call_anthropic(self, prompt: str, system_prompt: str,
+                        max_tokens: int) -> str:
+        client = anthropic.Anthropic(api_key=self.anthropic_api_key)
+        kwargs = {
+            "model": self.anthropic_model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if system_prompt:
+            kwargs["system"] = system_prompt
+        message = client.messages.create(**kwargs)
+        return message.content[0].text
+
+    def status(self) -> dict:
+        """Retorna estado de los proveedores configurados."""
+        info = {
+            "active_provider": self._resolve_provider(),
+            "groq": {
+                "configured": self._groq_available(),
+                "model_analysis": self.groq_model_analysis,
+                "model_fast": self.groq_model_fast,
+            },
+            "anthropic": {
+                "configured": self._anthropic_available(),
+                "model": self.anthropic_model,
+            },
+        }
+
+        if self._groq_available():
+            try:
+                response = httpx.get(
+                    f"{self._groq_base}/models",
+                    headers={"Authorization": f"Bearer {self.groq_api_key}"},
+                    timeout=10.0,
+                )
+                info["groq"]["connected"] = response.status_code == 200
+            except Exception:
+                info["groq"]["connected"] = False
+
+        return info

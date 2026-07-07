@@ -999,8 +999,8 @@
       <div class="page-title">📰 Noticias</div>
 
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:18px;flex-wrap:wrap">
-        <button class="btn btn-outline btn-sm" onclick="loadNews(false, true)">🔄 Actualizar</button>
-        <button class="btn btn-primary btn-sm" onclick="loadNews(true, true)" title="Genera contexto con Haiku (~$0.01)">✨ Contexto IA</button>
+        <button class="btn btn-outline btn-sm" onclick="loadNews(true)">🔄 Actualizar</button>
+        <button id="btn-news-ai" class="btn btn-primary btn-sm" onclick="enrichCurrentTab()" disabled title="Elegí una sección para generar contexto IA">🤖 Contexto IA</button>
         <span id="news-status" style="color:var(--text-faint);font-size:11px;margin-left:auto;font-family:var(--mono)"></span>
       </div>
 
@@ -1049,6 +1049,17 @@
         <div class="card">
           <div class="card-title">🤖 Estado del proveedor IA</div>
           <div id="ai-status"><div class="loading-overlay" style="padding:12px"><div class="spinner"></div> Consultando estado...</div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">📰 Salud de fuentes de noticias</div>
+          <p style="color:var(--text-muted);margin-bottom:12px;line-height:1.6">
+            Estado de cada feed RSS del sistema de noticias. El chequeo automático corre todos los lunes a las 08:00.
+          </p>
+          <div id="feed-health"><div class="loading-overlay" style="padding:12px"><div class="spinner"></div> Consultando estado...</div></div>
+          <div style="margin-top:12px">
+            <button id="btn-feed-health" class="btn btn-outline btn-sm" onclick="loadFeedHealth(true)">🔄 Chequear ahora</button>
+          </div>
         </div>
 
         <div class="card">
@@ -1196,7 +1207,7 @@ function navigate(page) {
   if (page === 'alertas') { loadAlerts(); loadSmartHistory(); pollUnseenBadge(); }
   // Noticias: carga automática solo si no hay datos aún (usa caché)
   if (page === 'news' && newsTotal() === 0) loadNews(false);
-  if (page === 'setup') loadAIStatus();
+  if (page === 'setup') { loadAIStatus(); loadFeedHealth(); }
   window.scrollTo(0, 0);
 }
 
@@ -2548,10 +2559,15 @@ async function saveSmartConfig() {
 
 const NEWS_SECTIONS = ['TECH_IA', 'IA_TECNICA', 'STARTUPS', 'VOCES', 'MERCADOS'];
 const NEWS_TABS = ['PORTFOLIO', ...NEWS_SECTIONS];   // PORTFOLIO agrega las in_portfolio de todas
+const NEWS_SECTION_LABELS = {
+  TECH_IA: 'Tech/IA', IA_TECNICA: 'IA Técnica', STARTUPS: 'Startups',
+  VOCES: 'Voces IA', MERCADOS: 'Mercados',
+};
 const NEWS_PAGE = 40;  // cuántas se muestran por sección antes de "Cargar más"
 let _newsData = { TECH_IA: [], IA_TECNICA: [], STARTUPS: [], VOCES: [], MERCADOS: [] };
 let _newsTab = 'PORTFOLIO';
 let _newsShown = {};   // por sección: cuántas se están mostrando
+let _newsEnriching = false;  // hay un enriquecimiento IA en curso
 
 function newsTotal() {
   return NEWS_SECTIONS.reduce((s, sec) => s + (_newsData[sec] || []).length, 0);
@@ -2574,6 +2590,72 @@ function switchNewsTab(tab) {
     document.getElementById('news-' + s).style.display = s === tab ? 'block' : 'none';
     document.getElementById('ntab-' + s).classList.toggle('active', s === tab);
   });
+  updateNewsAIButton();
+}
+
+function updateNewsAIButton() {
+  // El botón de contexto IA actúa sobre el tab activo. En "⭐ Míos" se
+  // deshabilita: sus noticias vienen mezcladas de todas las secciones.
+  const btn = document.getElementById('btn-news-ai');
+  if (!btn || _newsEnriching) return;
+  if (_newsTab === 'PORTFOLIO') {
+    btn.disabled = true;
+    btn.textContent = '🤖 Contexto IA';
+    btn.title = 'Elegí una sección para generar contexto IA';
+  } else {
+    btn.disabled = false;
+    btn.textContent = `🤖 Contexto IA para ${NEWS_SECTION_LABELS[_newsTab] || _newsTab}`;
+    btn.title = `Genera contexto con IA solo para ${NEWS_SECTION_LABELS[_newsTab] || _newsTab} (~$0.01)`;
+  }
+}
+
+async function enrichCurrentTab() {
+  const sec = _newsTab;
+  if (sec === 'PORTFOLIO' || _newsEnriching) return;
+
+  const btn = document.getElementById('btn-news-ai');
+  const status = document.getElementById('news-status');
+  const el = document.getElementById('news-' + sec);
+  _newsEnriching = true;
+  btn.disabled = true;
+  btn.textContent = '⏳ Generando contexto...';
+  // Estado de carga solo en la sección activa, sin ocultar las noticias
+  el.insertAdjacentHTML('afterbegin',
+    `<div id="news-ai-loading" class="loading-overlay" style="padding:14px;font-size:13px;color:var(--text-muted)">
+       <div class="spinner"></div> Generando contexto IA para ${NEWS_SECTION_LABELS[sec]}...
+     </div>`);
+
+  try {
+    const resp = await fetch(`/api/news?enrich=true&section=${sec}&max=80`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    // Merge del contexto en el estado JS por URL: el enriquecimiento queda en
+    // _newsData y sobrevive a los cambios de tab (no se re-fetchea al volver)
+    const ctxByUrl = {};
+    (data[sec] || []).forEach(n => { if (n.context) ctxByUrl[n.url] = n.context; });
+    if ((_newsData[sec] || []).length) {
+      _newsData[sec].forEach(n => { if (ctxByUrl[n.url]) n.context = ctxByUrl[n.url]; });
+    } else {
+      _newsData[sec] = data[sec] || [];
+    }
+
+    renderNewsSection(sec);
+    renderNewsSection('PORTFOLIO');  // "Míos" comparte items con las secciones
+
+    const nCtx = Object.keys(ctxByUrl).length;
+    status.textContent = nCtx
+      ? `✨ Contexto IA generado para ${NEWS_SECTION_LABELS[sec]} (${nCtx} noticias)`
+      : `⚠️ La IA no devolvió contexto para ${NEWS_SECTION_LABELS[sec]} — probá de nuevo`;
+  } catch (e) {
+    console.error(e);
+    const loading = document.getElementById('news-ai-loading');
+    if (loading) loading.remove();
+    status.textContent = `❌ Error generando contexto IA para ${NEWS_SECTION_LABELS[sec]}`;
+  } finally {
+    _newsEnriching = false;
+    updateNewsAIButton();
+  }
 }
 
 function newsCardHtml(n) {
@@ -2643,9 +2725,9 @@ function renderCurrentNews() {
   NEWS_TABS.forEach(renderNewsSection);
 }
 
-async function loadNews(withAI = false, forceRefresh = false) {
+async function loadNews(forceRefresh = false) {
   const status = document.getElementById('news-status');
-  status.textContent = withAI ? '⏳ Recolectando y analizando con IA...' : '⏳ Recolectando noticias...';
+  status.textContent = '⏳ Recolectando noticias...';
   _newsShown = {};  // reset paginación
 
   NEWS_TABS.forEach(s => {
@@ -2654,12 +2736,13 @@ async function loadNews(withAI = false, forceRefresh = false) {
   });
 
   try {
-    const url = `/api/news?enrich=${withAI}&max=80${forceRefresh ? '&refresh=true' : ''}`;
+    const url = `/api/news?enrich=false&max=80${forceRefresh ? '&refresh=true' : ''}`;
     const resp = await fetch(url);
     const data = await resp.json();
 
     _newsData = data;
     renderCurrentNews();
+    updateNewsAIButton();
 
     const meta = data._meta || {};
     let freshness;
@@ -2669,8 +2752,7 @@ async function loadNews(withAI = false, forceRefresh = false) {
     } else {
       freshness = 'recién actualizado';
     }
-    const aiTag = meta.enriched ? ' · ✨ con contexto IA' : '';
-    status.textContent = `${newsTotal()} noticias · ${freshness}${aiTag}`;
+    status.textContent = `${newsTotal()} noticias · ${freshness}`;
 
   } catch(e) {
     status.textContent = '❌ Error al cargar noticias';
@@ -2699,6 +2781,48 @@ async function loadAIStatus() {
       </div>`;
   } catch(e) {
     el.innerHTML = '<div style="color:var(--yellow);font-size:13px">⚠️ No se pudo consultar el estado del proveedor IA.</div>';
+  }
+}
+
+// ── Ajustes: salud de las fuentes de noticias ─────────────────────────────────
+async function loadFeedHealth(force = false) {
+  const el = document.getElementById('feed-health');
+  const btn = document.getElementById('btn-feed-health');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Chequeando...'; }
+  el.innerHTML = `<div class="loading-overlay" style="padding:12px"><div class="spinner"></div> ${force ? 'Chequeando todas las fuentes (puede tardar un rato)...' : 'Consultando estado...'}</div>`;
+  try {
+    const resp = await fetch(`/api/news/health${force ? '?refresh=true' : ''}`);
+    const data = await resp.json();
+    const rows = data.sources || [];
+    if (!rows.length) {
+      el.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Sin datos todavía — presioná "Chequear ahora".</div>';
+      return;
+    }
+    const down = rows.filter(r => r.status !== 'ok').length;
+    const rowsHtml = rows.map(r => {
+      const estado = r.status === 'ok'
+        ? `<span style="color:var(--green)">🟢 ok</span> <span style="color:var(--text-faint)">(${r.entries})</span>`
+        : `<span style="color:var(--red)">🔴 caída</span> <span style="color:var(--text-faint)">· último ok: ${r.last_ok ? r.last_ok.slice(0, 10) : 'nunca'}</span>`;
+      return `<tr>
+        <td style="padding:4px 8px 4px 0">${r.source_name}</td>
+        <td style="padding:4px 8px 4px 0;color:var(--text-muted);font-family:var(--mono);font-size:11px">${r.section}</td>
+        <td style="padding:4px 0;white-space:nowrap">${estado}</td>
+      </tr>`;
+    }).join('');
+    const checked = rows[0].last_checked ? rows[0].last_checked.replace('T', ' ') : '—';
+    el.innerHTML = `
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
+        ${rows.length} fuentes · ${down ? `<span style="color:var(--red)">${down} caída${down > 1 ? 's' : ''}</span>` : '<span style="color:var(--green)">todas OK</span>'}
+        · último chequeo: <span style="font-family:var(--mono)">${checked}</span>
+      </div>
+      <div style="max-height:260px;overflow-y:auto;overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">${rowsHtml}</table>
+      </div>`;
+  } catch (e) {
+    console.error(e);
+    el.innerHTML = '<div style="color:var(--yellow);font-size:13px">⚠️ No se pudo consultar la salud de las fuentes.</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Chequear ahora'; }
   }
 }
 

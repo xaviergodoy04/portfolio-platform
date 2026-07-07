@@ -112,6 +112,16 @@ CREATE TABLE IF NOT EXISTS watchlist (
     added_at TEXT,
     note TEXT DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS feed_health (
+    source_name TEXT PRIMARY KEY,
+    url TEXT,
+    section TEXT,
+    status TEXT,
+    entries INTEGER,
+    last_ok TEXT,
+    last_checked TEXT
+);
 """
 
 
@@ -355,6 +365,52 @@ def remove_from_watchlist(symbol: str) -> bool:
     with db_conn() as conn:
         cur = conn.execute("DELETE FROM watchlist WHERE symbol = ?", (symbol,))
         return cur.rowcount > 0
+
+
+# ── Health check de fuentes de noticias ─────────────────────────────────────
+
+def upsert_feed_health(source_name: str, url: str, section: str,
+                       status: str, entries: int, checked_at: str):
+    """Upsert del estado de una fuente RSS. Si la fuente respondió (status ok)
+    se actualiza last_ok; si está caída, se conserva el last_ok anterior para
+    saber desde cuándo dejó de funcionar."""
+    last_ok = checked_at if status == "ok" else None
+    with db_conn() as conn:
+        conn.execute(
+            """INSERT INTO feed_health
+               (source_name, url, section, status, entries, last_ok, last_checked)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(source_name) DO UPDATE SET
+                 url = excluded.url,
+                 section = excluded.section,
+                 status = excluded.status,
+                 entries = excluded.entries,
+                 last_ok = COALESCE(excluded.last_ok, feed_health.last_ok),
+                 last_checked = excluded.last_checked""",
+            (source_name, url, section, status, entries, last_ok, checked_at),
+        )
+
+
+def prune_feed_health(current_names: list):
+    """Borra fuentes que ya no existen en RSS_SOURCES (renombradas o eliminadas)."""
+    if not current_names:
+        return
+    placeholders = ",".join("?" for _ in current_names)
+    with db_conn() as conn:
+        conn.execute(
+            f"DELETE FROM feed_health WHERE source_name NOT IN ({placeholders})",
+            list(current_names),
+        )
+
+
+def get_feed_health() -> list:
+    """Estado de todas las fuentes, agrupadas por sección y nombre."""
+    with db_conn() as conn:
+        rows = conn.execute(
+            """SELECT source_name, url, section, status, entries, last_ok, last_checked
+               FROM feed_health ORDER BY section, source_name"""
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ── Instrumentación de uso de endpoints ──────────────────────────────────────

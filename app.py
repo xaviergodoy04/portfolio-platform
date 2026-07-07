@@ -28,9 +28,10 @@ from modules.track_record import get_track_record
 import asyncio
 import time
 from modules import db
-from modules.news.collector import collect_all as news_collect
-from modules.news.enricher import enrich_news
+from modules.news.collector import collect_all as news_collect, SECTIONS as NEWS_SECTIONS
+from modules.news.enricher import enrich_items
 from modules.news import cache as news_cache
+from modules.news import health as news_health
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
@@ -440,35 +441,18 @@ def _portfolio_symbols() -> set:
     return {p.get("symbol", "").upper() for p in data.get("positions", []) if p.get("symbol")}
 
 
-@app.route("/api/news")
-def get_news():
-    """
-    Recolecta noticias de todas las fuentes, las rankea y les agrega contexto de Haiku.
-    Parámetros:
-      ?enrich=true   → genera contexto con Haiku (requiere API key)
-      ?enrich=false  → solo títulos y links, sin IA (default)
-      ?max=15        → máximo de noticias por sección
-      ?refresh=true  → ignora el cache y vuelve a recolectar
-    """
-    do_enrich = request.args.get("enrich", "false") == "true"
-    max_items = int(request.args.get("max", 80))
-    force_refresh = request.args.get("refresh", "false") == "true"
+# Cache de noticias en dos niveles:
+#   - Pool base (sin IA): key "base|max={n}", TTL corto — recolectar es gratis.
+#   - Contexto IA por sección: key "enriched|{SECCION}" con un mapa {url: context},
+#     TTL largo porque regenerarlo cuesta dinero. Al servir, el contexto se
+#     mergea sobre el pool base sin re-recolectar ni re-enriquecer lo demás.
+NEWS_BASE_TTL = 20 * 60
+NEWS_ENRICH_TTL = 6 * 3600
+NEWS_ENRICH_TOP_N = 12  # cuántas noticias por sección se enriquecen (costo acotado)
 
-    # Cache: la versión sin IA dura poco (20 min); la enriquecida dura más (6 h)
-    # porque cuesta dinero regenerarla.
-    cache_key = f"enrich={do_enrich}|max={max_items}"
-    ttl = 6 * 3600 if do_enrich else 20 * 60
 
-    port_syms = _portfolio_symbols()
-    watch_syms = {s.upper() for s in db.get_watchlist_symbols()}
-
-    if not force_refresh:
-        cached, age = news_cache.get(cache_key, ttl)
-        if cached is not None:
-            _mark_symbols(cached, port_syms, watch_syms)
-            cached["_meta"] = {"cached": True, "age_seconds": age, "enriched": do_enrich}
-            return jsonify(cached)
-
+def _collect_news_serialized(max_items: int) -> dict:
+    """Recolecta todas las fuentes y serializa a dicts listos para JSON/cache."""
     # collect_all es async, lo corremos desde Flask con asyncio.run
     try:
         data = asyncio.run(news_collect(max_per_section=max_items))
@@ -478,14 +462,6 @@ def get_news():
         data = loop.run_until_complete(news_collect(max_per_section=max_items))
         loop.close()
 
-    # Enriquecer con Haiku si se pide. Solo las más relevantes de cada sección
-    # para mantener el costo y el tamaño de respuesta acotados; enrich_news muta
-    # los NewsItem in-place, así que el resto de la lista queda intacto.
-    if do_enrich:
-        for section in data:
-            enrich_news(data[section][:12], config)
-
-    # Serializar a dict para JSON
     result = {}
     for section, items in data.items():
         result[section] = [
@@ -502,11 +478,88 @@ def get_news():
             }
             for item in items
         ]
+    return result
 
-    news_cache.set(cache_key, result)
+
+@app.route("/api/news")
+def get_news():
+    """
+    Recolecta noticias de todas las fuentes, las rankea y opcionalmente les
+    agrega contexto de IA.
+    Parámetros:
+      ?enrich=true        → genera contexto con IA (requiere API key)
+      ?enrich=false       → solo títulos y links, sin IA (default)
+      ?section=MERCADOS   → con enrich=true, enriquece SOLO esa sección.
+                            Sin section, enriquece todas (comportamiento legacy).
+      ?max=15             → máximo de noticias por sección
+      ?refresh=true       → ignora el cache: re-recolecta y re-enriquece
+    """
+    do_enrich = request.args.get("enrich", "false") == "true"
+    max_items = int(request.args.get("max", 80))
+    force_refresh = request.args.get("refresh", "false") == "true"
+    section = (request.args.get("section") or "").strip().upper() or None
+
+    if section and section not in NEWS_SECTIONS:
+        return jsonify({"error": f"Sección inválida: {section}. Válidas: {NEWS_SECTIONS}"}), 400
+
+    # 1) Pool base: cache fresco si lo hay, si no re-recolectar
+    base_key = f"base|max={max_items}"
+    result, age = (None, None)
+    if not force_refresh:
+        result, age = news_cache.get(base_key, NEWS_BASE_TTL)
+    from_cache = result is not None
+    if result is None:
+        result = _collect_news_serialized(max_items)
+        news_cache.set(base_key, result)  # se cachea limpio, sin contexto ni marcas
+        age = 0
+
+    # 2) Contexto IA por sección: usa el cache por sección o enriquece las top N
+    enriched_sections = []
+    if do_enrich:
+        targets = [section] if section else NEWS_SECTIONS
+        for sec in targets:
+            items = result.get(sec) or []
+            ctx_map = None
+            if not force_refresh:
+                ctx_map, _ = news_cache.get(f"enriched|{sec}", NEWS_ENRICH_TTL)
+            if not ctx_map:
+                top = items[:NEWS_ENRICH_TOP_N]
+                enrich_items(top, config)
+                ctx_map = {it["url"]: it["context"] for it in top if it.get("context")}
+                # Solo cachear si hubo resultado: un fallo del LLM no debe
+                # quedar cacheado 6 horas
+                if ctx_map:
+                    news_cache.set(f"enriched|{sec}", ctx_map)
+            for it in items:
+                ctx = ctx_map.get(it["url"])
+                if ctx:
+                    it["context"] = ctx
+            if ctx_map:
+                enriched_sections.append(sec)
+
+    port_syms = _portfolio_symbols()
+    watch_syms = {s.upper() for s in db.get_watchlist_symbols()}
     _mark_symbols(result, port_syms, watch_syms)
-    result["_meta"] = {"cached": False, "age_seconds": 0, "enriched": do_enrich}
+    result["_meta"] = {
+        "cached": from_cache,
+        "age_seconds": age or 0,
+        "enriched": do_enrich,
+        "enriched_sections": enriched_sections,
+    }
     return jsonify(result)
+
+
+@app.route("/api/news/health")
+def news_feed_health():
+    """
+    Estado de salud de las fuentes RSS de noticias (tabla feed_health).
+    Si nunca se corrió el chequeo (o se pide ?refresh=true), lo corre ahora.
+    """
+    force = request.args.get("refresh", "false") == "true"
+    rows = db.get_feed_health()
+    if force or not rows:
+        rows = news_health.check_all_feeds()
+    return jsonify({"sources": rows, "count": len(rows)})
 
 
 def _mark_symbols(result: dict, port_syms: set, watch_syms: set) -> None:

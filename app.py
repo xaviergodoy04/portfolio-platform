@@ -23,6 +23,7 @@ from modules.smart_alerts import (
     update_config as smart_update_config
 )
 from modules.scheduler import init_scheduler, pop_pending_triggered
+from modules.track_record import get_track_record
 import asyncio
 import time
 from modules import db
@@ -298,6 +299,12 @@ def smart_mark_seen():
 @app.route("/api/smart-alerts/history")
 def smart_hist():
     return jsonify(smart_history())
+
+@app.route("/api/smart-alerts/track-record")
+def smart_track_record():
+    """Performance de cada smart alert desde su detección vs SPY (cacheado 15 min)."""
+    force = request.args.get("refresh", "false") == "true"
+    return jsonify(get_track_record(force_refresh=force))
 
 @app.route("/api/smart-alerts/config", methods=["GET"])
 def smart_cfg_get():

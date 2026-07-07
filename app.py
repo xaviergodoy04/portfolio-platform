@@ -239,8 +239,22 @@ def chat():
     if not question:
         return jsonify({"error": "Pregunta vacía"}), 400
 
+    # Historial de conversación (opcional, retro-compatible): se limita a los
+    # últimos 20 mensajes para acotar el tamaño del prompt.
+    history = body.get("history")
+    if isinstance(history, list):
+        history = history[-20:]
+    else:
+        history = None
+
+    # Símbolo que el usuario está mirando en la UI (opcional)
+    context_symbol = body.get("context_symbol") or None
+    if context_symbol:
+        context_symbol = str(context_symbol).strip().upper()[:12]
+
     portfolio = _portfolio_cache.get("data")
-    answer = chat_analysis(question, config, portfolio)
+    answer = chat_analysis(question, config, portfolio,
+                           history=history, context_symbol=context_symbol)
     return jsonify({"answer": answer})
 
 

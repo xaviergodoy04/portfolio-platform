@@ -139,9 +139,16 @@ IMPORTANTE: Respondé SOLO con el JSON válido, sin texto adicional, sin markdow
         return {"error": f"Error en análisis IA: {str(e)}"}
 
 
-def chat_analysis(question: str, cfg, portfolio_data: dict = None) -> str:
+def chat_analysis(question: str, cfg, portfolio_data: dict = None,
+                  history: list = None, context_symbol: str = None) -> str:
     """
     Chat libre sobre inversiones con contexto del portfolio.
+
+    Parámetros opcionales (retro-compatibles):
+      history        — mensajes previos de la conversación
+                       [{"role": "user"|"assistant", "content": str}, ...]
+      context_symbol — símbolo que el usuario está mirando en la UI, se agrega
+                       al prompt como contexto de pantalla.
     """
     try:
         provider = _build_provider(cfg)
@@ -154,6 +161,11 @@ Sos directo y claro. Siempre aclarás que no sos un asesor financiero registrado
 las decisiones de inversión son responsabilidad del usuario."""
 
     user_message = question
+    if context_symbol:
+        user_message = (
+            f"(Contexto: el usuario está mirando el activo {context_symbol} "
+            f"en la plataforma en este momento.)\n\n{user_message}"
+        )
     if portfolio_data and portfolio_data.get("positions"):
         portfolio_summary = json.dumps({
             "positions": [
@@ -166,7 +178,7 @@ las decisiones de inversión son responsabilidad del usuario."""
             ],
             "total_value": portfolio_data.get("summary", {}).get("total_value", 0)
         }, indent=2)
-        user_message = f"Mi portfolio actual:\n{portfolio_summary}\n\nPregunta: {question}"
+        user_message = f"Mi portfolio actual:\n{portfolio_summary}\n\nPregunta: {user_message}"
 
     try:
         response, _ = provider.generate_with_fallback(
@@ -174,6 +186,7 @@ las decisiones de inversión son responsabilidad del usuario."""
             system_prompt=system_prompt,
             max_tokens=1024,
             tier="analysis",
+            history=history,
         )
         return response
     except Exception as e:

@@ -40,45 +40,63 @@ class AIProvider:
         return self.provider
 
     def generate(self, prompt: str, system_prompt: str = "",
-                 max_tokens: int = 1024, tier: str = "analysis") -> str:
+                 max_tokens: int = 1024, tier: str = "analysis",
+                 history: list = None) -> str:
         provider = self._resolve_provider()
 
         if provider == "groq":
-            return self._call_groq(prompt, system_prompt, max_tokens, tier)
+            return self._call_groq(prompt, system_prompt, max_tokens, tier, history)
         elif provider == "anthropic":
-            return self._call_anthropic(prompt, system_prompt, max_tokens)
+            return self._call_anthropic(prompt, system_prompt, max_tokens, history)
         else:
             raise RuntimeError("No hay proveedor de IA configurado. "
                                "Configurá GROQ_API_KEY o ANTHROPIC_API_KEY en config.py")
 
     def generate_with_fallback(self, prompt: str, system_prompt: str = "",
-                               max_tokens: int = 1024, tier: str = "analysis") -> tuple[str, str]:
-        """Genera texto, con fallback automático. Retorna (respuesta, proveedor_usado)."""
+                               max_tokens: int = 1024, tier: str = "analysis",
+                               history: list = None) -> tuple[str, str]:
+        """Genera texto, con fallback automático. Retorna (respuesta, proveedor_usado).
+        `history` (opcional): mensajes previos de la conversación,
+        lista de {"role": "user"|"assistant", "content": str}."""
         provider = self._resolve_provider()
 
         if provider == "groq":
             try:
-                result = self._call_groq(prompt, system_prompt, max_tokens, tier)
+                result = self._call_groq(prompt, system_prompt, max_tokens, tier, history)
                 return result, "groq"
             except Exception:
                 if self._anthropic_available():
-                    result = self._call_anthropic(prompt, system_prompt, max_tokens)
+                    result = self._call_anthropic(prompt, system_prompt, max_tokens, history)
                     return result, "anthropic"
                 raise
 
         if provider == "anthropic":
-            result = self._call_anthropic(prompt, system_prompt, max_tokens)
+            result = self._call_anthropic(prompt, system_prompt, max_tokens, history)
             return result, "anthropic"
 
         raise RuntimeError("No hay proveedor de IA configurado.")
 
+    @staticmethod
+    def _clean_history(history: list) -> list:
+        """Filtra el historial a mensajes válidos {role: user|assistant, content: str}."""
+        if not history:
+            return []
+        return [
+            {"role": m["role"], "content": str(m["content"])}
+            for m in history
+            if isinstance(m, dict)
+            and m.get("role") in ("user", "assistant")
+            and m.get("content")
+        ]
+
     def _call_groq(self, prompt: str, system_prompt: str,
-                   max_tokens: int, tier: str) -> str:
+                   max_tokens: int, tier: str, history: list = None) -> str:
         model = self.groq_model_analysis if tier == "analysis" else self.groq_model_fast
 
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
+        messages.extend(self._clean_history(history))
         messages.append({"role": "user", "content": prompt})
 
         response = httpx.post(
@@ -100,12 +118,14 @@ class AIProvider:
         return data["choices"][0]["message"]["content"]
 
     def _call_anthropic(self, prompt: str, system_prompt: str,
-                        max_tokens: int) -> str:
+                        max_tokens: int, history: list = None) -> str:
         client = anthropic.Anthropic(api_key=self.anthropic_api_key)
+        messages = self._clean_history(history)
+        messages.append({"role": "user", "content": prompt})
         kwargs = {
             "model": self.anthropic_model,
             "max_tokens": max_tokens,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
         }
         if system_prompt:
             kwargs["system"] = system_prompt

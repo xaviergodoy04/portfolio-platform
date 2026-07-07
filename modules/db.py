@@ -106,6 +106,12 @@ CREATE TABLE IF NOT EXISTS events (
     status INTEGER,
     duration_ms REAL
 );
+
+CREATE TABLE IF NOT EXISTS watchlist (
+    symbol TEXT PRIMARY KEY,
+    added_at TEXT,
+    note TEXT DEFAULT ''
+);
 """
 
 
@@ -308,6 +314,47 @@ def has_backup_today() -> bool:
     """True si ya existe el backup de hoy en data/backups/."""
     today = datetime.now().strftime("%Y-%m-%d")
     return os.path.exists(os.path.join(BACKUPS_DIR, f"portfolio-{today}.db"))
+
+
+# ── Watchlist ────────────────────────────────────────────────────────────────
+
+def get_watchlist() -> list:
+    """Entradas de la watchlist, la más reciente primero."""
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT symbol, added_at, note FROM watchlist ORDER BY added_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_watchlist_symbols() -> list:
+    """Solo los símbolos (para sumarlos al radar y a las smart alerts)."""
+    with db_conn() as conn:
+        rows = conn.execute("SELECT symbol FROM watchlist").fetchall()
+    return [r["symbol"] for r in rows]
+
+
+def add_to_watchlist(symbol: str, note: str = "") -> dict:
+    """Agrega un símbolo a la watchlist. Si ya existe, retorna la entrada actual."""
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT symbol, added_at, note FROM watchlist WHERE symbol = ?", (symbol,)
+        ).fetchone()
+        if row:
+            return dict(row)
+        entry = {"symbol": symbol, "added_at": datetime.now().isoformat(), "note": note or ""}
+        conn.execute(
+            "INSERT INTO watchlist (symbol, added_at, note) VALUES (?, ?, ?)",
+            (entry["symbol"], entry["added_at"], entry["note"]),
+        )
+    return entry
+
+
+def remove_from_watchlist(symbol: str) -> bool:
+    """Quita un símbolo de la watchlist. True si existía."""
+    with db_conn() as conn:
+        cur = conn.execute("DELETE FROM watchlist WHERE symbol = ?", (symbol,))
+        return cur.rowcount > 0
 
 
 # ── Instrumentación de uso de endpoints ──────────────────────────────────────

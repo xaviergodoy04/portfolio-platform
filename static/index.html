@@ -511,6 +511,50 @@
       flex-shrink: 0;
       margin-top: 2px;
     }
+
+    /* ── Watchlist ── */
+    .news-card.watchlist-hit { border-left-color: var(--yellow); }
+    .news-watch-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: rgba(251,191,36,.09);
+      color: rgba(251,191,36,.85);
+      border: 1px solid rgba(251,191,36,.2);
+      border-radius: 5px;
+      padding: 1px 7px;
+      font-size: 10px;
+      font-weight: 600;
+      font-family: var(--mono);
+      white-space: nowrap;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .star-btn { font-size: 13px; }
+    .watch-card {
+      cursor: pointer;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 26px 10px 12px;
+      min-width: 132px;
+      position: relative;
+      transition: border-color .15s, background .15s;
+    }
+    .watch-card:hover { border-color: rgba(251,191,36,.35); background: rgba(255,255,255,0.05); }
+    .watch-card .watch-remove {
+      position: absolute;
+      top: 6px;
+      right: 7px;
+      background: none;
+      border: none;
+      color: var(--text-faint);
+      cursor: pointer;
+      font-size: 12px;
+      width: auto;
+      padding: 2px 4px;
+    }
+    .watch-card .watch-remove:hover { color: var(--red); }
   </style>
 </head>
 <body>
@@ -580,10 +624,19 @@
         </div>
       </div>
 
-      <!-- Noticias del portfolio -->
+      <!-- Watchlist -->
       <div class="card" style="margin-bottom:20px">
         <div class="section-header">
-          <div class="card-title" style="margin:0">⭐ Noticias de tu portfolio</div>
+          <div class="card-title" style="margin:0">⭐ Watchlist</div>
+          <button class="btn btn-outline btn-sm" onclick="navigate('explorar')">Explorar →</button>
+        </div>
+        <div id="hoy-watchlist"><div style="padding:8px 0;color:var(--text-muted);font-size:13px">Marcá activos con ⭐ desde Explorar.</div></div>
+      </div>
+
+      <!-- Noticias de tus activos (portfolio + watchlist) -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="section-header">
+          <div class="card-title" style="margin:0">⭐ Noticias de tus activos</div>
           <button class="btn btn-outline btn-sm" onclick="navigate('news')">Ver todas →</button>
         </div>
         <div id="hoy-news-list"><div class="loading-overlay" style="padding:20px"><div class="spinner"></div> Buscando noticias...</div></div>
@@ -657,6 +710,7 @@
           <button class="btn btn-primary btn-sm" onclick="detailAnalyze()">🤖 Análisis IA</button>
           <button class="btn btn-outline btn-sm" onclick="toggleDetailAlert()">🔔 Crear alerta</button>
           <button class="btn btn-outline btn-sm" onclick="addToCompare(currentDetailSymbol)">📊 Comparar</button>
+          <button class="btn btn-outline btn-sm" id="detail-star" onclick="toggleWatchlist(currentDetailSymbol, event)">☆ Watchlist</button>
         </div>
 
         <!-- Form de alerta inline (sin salir de la vista) -->
@@ -726,7 +780,7 @@
           <button class="btn btn-primary" onclick="runRadar(true)">↻ Escanear ahora</button>
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:8px">
-          Escanea ~50 activos en Tech/IA, Defensa, Salud, Finanzas, Energía y Consumo + los que agregues. Click en una fila para ver el detalle del activo.
+          Escanea ~50 activos en Tech/IA, Defensa, Salud, Finanzas, Energía y Consumo + los que agregues. Tu watchlist ⭐ se incluye siempre. Click en una fila para ver el detalle del activo.
         </div>
       </div>
 
@@ -953,7 +1007,7 @@
       <div class="news-box">
         <!-- Tabs de sección -->
         <div class="news-tabbar">
-          <button id="ntab-PORTFOLIO"  class="news-tab active" onclick="switchNewsTab('PORTFOLIO')">⭐ Mi Portfolio</button>
+          <button id="ntab-PORTFOLIO"  class="news-tab active" onclick="switchNewsTab('PORTFOLIO')">⭐ Míos</button>
           <button id="ntab-TECH_IA"    class="news-tab" onclick="switchNewsTab('TECH_IA')">🤖 Tech/IA</button>
           <button id="ntab-IA_TECNICA" class="news-tab" onclick="switchNewsTab('IA_TECNICA')">🔬 IA Técnica</button>
           <button id="ntab-STARTUPS"   class="news-tab" onclick="switchNewsTab('STARTUPS')">🚀 Startups</button>
@@ -1120,6 +1174,10 @@
 <script>
 const API = '';
 let portfolioData = null;
+// Estado global de la watchlist: se carga al inicio y tras cada toggle,
+// así las estrellas de radar/detalle se pintan sin un fetch por fila.
+let watchlistData = [];
+let watchlistSet = new Set();
 let compareChart = null;
 let allocationChart = null;
 let evolutionChart = null;
@@ -1362,6 +1420,7 @@ function loadHoyExtras() {
   loadEvolution();
   loadHoySmart();
   loadHoyTriggered();
+  loadWatchlist();
   loadHoyNews();
 }
 
@@ -1419,7 +1478,7 @@ async function loadHoyNews() {
     }
     const list = portfolioNewsList().slice(0, 5);
     if (!list.length) {
-      el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">Ninguna noticia reciente menciona activos de tu portfolio.</div>';
+      el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">Ninguna noticia reciente menciona activos de tu portfolio o watchlist.</div>';
       return;
     }
     el.innerHTML = list.map(n => `
@@ -1430,6 +1489,79 @@ async function loadHoyNews() {
   } catch(e) {
     el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">⚠️ No se pudieron cargar las noticias.</div>';
   }
+}
+
+// ── Watchlist ─────────────────────────────────────────────────────────────────
+function isWatched(symbol) {
+  return watchlistSet.has((symbol || '').trim().toUpperCase());
+}
+
+async function loadWatchlist() {
+  try {
+    const resp = await fetch('/api/watchlist');
+    watchlistData = await resp.json();
+    watchlistSet = new Set(watchlistData.map(w => w.symbol));
+  } catch(e) {
+    return;  // sin conexión: dejamos el último estado conocido
+  }
+  renderHoyWatchlist();
+  refreshStars();
+}
+
+async function toggleWatchlist(symbol, ev) {
+  if (ev) ev.stopPropagation();  // no abrir el detalle al clickear la estrella
+  symbol = (symbol || '').trim().toUpperCase();
+  if (!symbol) return;
+
+  try {
+    if (isWatched(symbol)) {
+      await fetch(`/api/watchlist/${symbol}`, { method: 'DELETE' });
+      showToast(`☆ ${symbol} quitado de la watchlist`);
+    } else {
+      const resp = await fetch('/api/watchlist', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ symbol })
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        showToast(`❌ ${data.error || 'No se pudo agregar a la watchlist'}`);
+        return;
+      }
+      showToast(`⭐ ${symbol} agregado a la watchlist`);
+    }
+    await loadWatchlist();
+  } catch(e) {
+    showToast('❌ Error de conexión con la watchlist');
+  }
+}
+
+// Repinta las estrellas visibles (detalle + filas del radar) según el estado global
+function refreshStars() {
+  const detailBtn = document.getElementById('detail-star');
+  if (detailBtn) {
+    const on = currentDetailSymbol && isWatched(currentDetailSymbol);
+    detailBtn.textContent = on ? '⭐ En watchlist' : '☆ Watchlist';
+    detailBtn.title = on ? 'Quitar de la watchlist' : 'Agregar a la watchlist';
+  }
+  document.querySelectorAll('.star-btn[data-symbol]').forEach(b => {
+    b.textContent = isWatched(b.dataset.symbol) ? '⭐' : '☆';
+  });
+}
+
+function renderHoyWatchlist() {
+  const el = document.getElementById('hoy-watchlist');
+  if (!el) return;
+  if (!watchlistData.length) {
+    el.innerHTML = '<div style="padding:8px 0;color:var(--text-muted);font-size:13px">Marcá activos con ⭐ desde Explorar.</div>';
+    return;
+  }
+  el.innerHTML = '<div style="display:flex;gap:10px;flex-wrap:wrap">' + watchlistData.map(w => `
+    <div class="watch-card" onclick="openAssetDetail('${w.symbol}')" title="Ver detalle de ${w.symbol}">
+      <button class="watch-remove" onclick="toggleWatchlist('${w.symbol}', event)" title="Quitar de la watchlist">✕</button>
+      <div style="font-family:var(--mono);font-weight:700;font-size:13px">${w.symbol}</div>
+      <div style="font-family:var(--mono);font-size:15px;margin-top:4px">${w.error ? '—' : fmtMoney(w.price)}</div>
+      <div style="font-size:12px;margin-top:2px">${w.error ? '<span class="neutral">sin datos</span>' : fmtPct(w.change_pct)}</div>
+    </div>`).join('') + '</div>';
 }
 
 // ── Upload CSV ────────────────────────────────────────────────────────────────
@@ -1511,6 +1643,7 @@ async function openAssetDetail(symbol, opts = {}) {
 
   currentDetailSymbol = symbol;
   currentDetailPrice = null;
+  refreshStars();  // pinta la estrella ⭐/☆ del detalle según la watchlist
 
   const detail = document.getElementById('asset-detail');
   detail.style.display = 'block';
@@ -2195,6 +2328,7 @@ function fullRow(r, showSector, highlight) {
     <td>${revG}</td>
     <td style="font-size:12px">${upside}</td>
     <td style="white-space:nowrap">
+      <button class="btn btn-outline btn-sm star-btn" data-symbol="${r.symbol}" onclick="toggleWatchlist('${r.symbol}', event)" title="${isWatched(r.symbol) ? 'Quitar de la watchlist' : 'Agregar a la watchlist'}">${isWatched(r.symbol) ? '⭐' : '☆'}</button>
       <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();quickAnalyze('${r.symbol}')" title="Analizar con IA">🤖</button>
       <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();radarSetAlert('${r.symbol}', ${r.current_price || 0})" title="Alerta">🔔</button>
     </td>
@@ -2424,10 +2558,11 @@ function newsTotal() {
 }
 
 function portfolioNewsList() {
+  // Tab "⭐ Míos": noticias que mencionan activos del portfolio o de la watchlist
   const seen = new Set();
   const out = [];
   NEWS_SECTIONS.forEach(sec => (_newsData[sec] || []).forEach(n => {
-    if (n.in_portfolio && !seen.has(n.url)) { seen.add(n.url); out.push(n); }
+    if ((n.in_portfolio || n.in_watchlist) && !seen.has(n.url)) { seen.add(n.url); out.push(n); }
   }));
   out.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
   return out;
@@ -2455,13 +2590,18 @@ function newsCardHtml(n) {
     ? `<span class="news-port-badge" title="Menciona un activo de tu portfolio">★ Portfolio</span>`
     : '';
 
+  const watchBadge = n.in_watchlist
+    ? `<span class="news-watch-badge" title="Menciona un activo de tu watchlist">⭐ Watchlist</span>`
+    : '';
+
   return `
-    <div class="news-card ${n.in_portfolio ? 'portfolio-hit' : ''}">
+    <div class="news-card ${n.in_portfolio ? 'portfolio-hit' : (n.in_watchlist ? 'watchlist-hit' : '')}">
       <div class="news-card-header">
         <div class="news-title" style="flex:1">
           <a href="${n.url}" target="_blank" rel="noopener">${n.title}</a>
         </div>
         ${portBadge}
+        ${watchBadge}
       </div>
       <div class="news-meta">${n.source} · ${n.published}</div>
       ${symbolsHtml}
@@ -2476,7 +2616,7 @@ function renderNewsSection(section) {
 
   if (!list.length) {
     const msg = section === 'PORTFOLIO'
-      ? 'Ninguna noticia reciente menciona activos de tu portfolio'
+      ? 'Ninguna noticia reciente menciona activos de tu portfolio o watchlist'
       : 'No se encontraron noticias';
     el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-muted)">${msg}</div>`;
     return;

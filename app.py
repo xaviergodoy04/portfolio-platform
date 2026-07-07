@@ -22,6 +22,7 @@ from modules.smart_alerts import (
     get_history as smart_history, get_config as smart_get_config,
     update_config as smart_update_config
 )
+from modules.scheduler import init_scheduler, pop_pending_triggered
 import asyncio
 import time
 from modules import db
@@ -243,13 +244,18 @@ def remove_alert(alert_id):
 
 @app.route("/api/alerts/check", methods=["GET"])
 def check():
-    """Verifica alertas contra precios actuales de las posiciones en caché."""
+    """Verifica alertas contra precios actuales de las posiciones en caché.
+    Además entrega lo que el scheduler haya disparado desde el último poll."""
+    # Alertas disparadas por el scheduler server-side, pendientes de notificar
+    pending = pop_pending_triggered()
+
     alerts = get_alerts()
-    if not alerts:
-        return jsonify([])
+    active = [a for a in alerts if not a["triggered"]]
+    if not active:
+        return jsonify(pending)
 
     # Obtener precios actuales de los símbolos con alertas activas
-    symbols = list({a["symbol"] for a in alerts if not a["triggered"]})
+    symbols = list({a["symbol"] for a in active})
     prices = {}
     for sym in symbols:
         q = get_quote(sym)
@@ -257,7 +263,7 @@ def check():
             prices[sym] = q.get("price", 0)
 
     triggered = check_alerts(prices)
-    return jsonify(triggered)
+    return jsonify(pending + triggered)
 
 
 # ── Radar de Oportunidades ───────────────────────────────────────────────────
@@ -400,4 +406,11 @@ if __name__ == "__main__":
     print(f"   AI Provider: {config.AI_PROVIDER}")
     print(f"   Groq (gratis): {'✅ configurado' if groq_ok else '⚠️  no configurado'}")
     print(f"   Anthropic (pago): {'✅ configurado' if anthropic_ok else '⚠️  no configurado'}")
+
+    # Iniciar el scheduler evitando el doble arranque del reloader de Flask:
+    # - con debug/reloader activo, solo el proceso hijo tiene WERKZEUG_RUN_MAIN=true
+    # - sin reloader (DEBUG_MODE=false), se inicia directo
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not config.DEBUG_MODE:
+        init_scheduler()
+
     app.run(debug=config.DEBUG_MODE, port=config.APP_PORT)

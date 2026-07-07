@@ -34,11 +34,11 @@ SECTIONS = ["TECH_IA", "IA_TECNICA", "STARTUPS", "VOCES", "MERCADOS"]
 RSS_SOURCES = [
     # ── TECH_IA — IA / tecnología general (catch-all, se rutea por contenido) ──
     ("TechCrunch AI",       "https://techcrunch.com/category/artificial-intelligence/feed/", "TECH_IA"),
-    ("The Verge AI",        "https://www.theverge.com/ai-artificial-intelligence/rss/index.xml", "TECH_IA"),
+    ("The Verge AI",        "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml", "TECH_IA"),
     ("Ars Technica",        "https://feeds.arstechnica.com/arstechnica/technology-lab", "TECH_IA"),
     ("VentureBeat AI",      "https://venturebeat.com/category/ai/feed/", "TECH_IA"),
     ("VentureBeat",         "https://venturebeat.com/feed/", "TECH_IA"),
-    ("Wired AI",            "https://www.wired.com/feed/tag/artificial-intelligence/latest/rss", "TECH_IA"),
+    ("Wired AI",            "https://www.wired.com/feed/tag/ai/latest/rss", "TECH_IA"),
     ("MIT Tech Review",     "https://www.technologyreview.com/feed/", "TECH_IA"),
 
     # ── IA_TECNICA — research, modelos, sistemas ──

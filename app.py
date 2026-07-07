@@ -13,7 +13,13 @@ import threading
 
 import config
 from modules.ibkr import fetch_flex_report, parse_csv_upload
-from modules.market_data import get_quote, get_history, compare_assets, enrich_positions
+from modules.market_data import (
+    VALID_COMPARE_PERIODS,
+    get_quote,
+    get_history,
+    compare_assets,
+    enrich_positions,
+)
 from modules.ai_analysis import analyze_asset, chat_analysis
 from modules.ai_provider import AIProvider
 from modules.alerts import get_alerts, create_alert, create_pct_alert, delete_alert, check_alerts
@@ -28,9 +34,11 @@ from modules.track_record import get_track_record
 import asyncio
 import time
 from modules import db
-from modules.news.collector import collect_all as news_collect
-from modules.news.enricher import enrich_news
+from modules.news.collector import collect_all as news_collect, SECTIONS as NEWS_SECTIONS
+from modules.news.enricher import enrich_items
 from modules.news import cache as news_cache
+from modules.news import health as news_health
+from modules.news.affinity import affinity_bonus, invalidate_profile
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
@@ -217,10 +225,15 @@ def history(symbol):
 @app.route("/api/compare")
 def compare():
     symbols_str = request.args.get("symbols", "")
+    period = request.args.get("period", "1y")
     symbols = [s.strip().upper() for s in symbols_str.split(",") if s.strip()]
     if not symbols:
         return jsonify({"error": "Indicá al menos un símbolo"}), 400
-    return jsonify(compare_assets(symbols))
+    if period not in VALID_COMPARE_PERIODS:
+        return jsonify({
+            "error": f"Período inválido: '{period}'. Válidos: {', '.join(VALID_COMPARE_PERIODS)}"
+        }), 400
+    return jsonify(compare_assets(symbols, period))
 
 
 # ── AI Analysis ──────────────────────────────────────────────────────────────
@@ -440,35 +453,18 @@ def _portfolio_symbols() -> set:
     return {p.get("symbol", "").upper() for p in data.get("positions", []) if p.get("symbol")}
 
 
-@app.route("/api/news")
-def get_news():
-    """
-    Recolecta noticias de todas las fuentes, las rankea y les agrega contexto de Haiku.
-    Parámetros:
-      ?enrich=true   → genera contexto con Haiku (requiere API key)
-      ?enrich=false  → solo títulos y links, sin IA (default)
-      ?max=15        → máximo de noticias por sección
-      ?refresh=true  → ignora el cache y vuelve a recolectar
-    """
-    do_enrich = request.args.get("enrich", "false") == "true"
-    max_items = int(request.args.get("max", 80))
-    force_refresh = request.args.get("refresh", "false") == "true"
+# Cache de noticias en dos niveles:
+#   - Pool base (sin IA): key "base|max={n}", TTL corto — recolectar es gratis.
+#   - Contexto IA por sección: key "enriched|{SECCION}" con un mapa {url: context},
+#     TTL largo porque regenerarlo cuesta dinero. Al servir, el contexto se
+#     mergea sobre el pool base sin re-recolectar ni re-enriquecer lo demás.
+NEWS_BASE_TTL = 20 * 60
+NEWS_ENRICH_TTL = 6 * 3600
+NEWS_ENRICH_TOP_N = 12  # cuántas noticias por sección se enriquecen (costo acotado)
 
-    # Cache: la versión sin IA dura poco (20 min); la enriquecida dura más (6 h)
-    # porque cuesta dinero regenerarla.
-    cache_key = f"enrich={do_enrich}|max={max_items}"
-    ttl = 6 * 3600 if do_enrich else 20 * 60
 
-    port_syms = _portfolio_symbols()
-    watch_syms = {s.upper() for s in db.get_watchlist_symbols()}
-
-    if not force_refresh:
-        cached, age = news_cache.get(cache_key, ttl)
-        if cached is not None:
-            _mark_symbols(cached, port_syms, watch_syms)
-            cached["_meta"] = {"cached": True, "age_seconds": age, "enriched": do_enrich}
-            return jsonify(cached)
-
+def _collect_news_serialized(max_items: int) -> dict:
+    """Recolecta todas las fuentes y serializa a dicts listos para JSON/cache."""
     # collect_all es async, lo corremos desde Flask con asyncio.run
     try:
         data = asyncio.run(news_collect(max_per_section=max_items))
@@ -478,14 +474,6 @@ def get_news():
         data = loop.run_until_complete(news_collect(max_per_section=max_items))
         loop.close()
 
-    # Enriquecer con Haiku si se pide. Solo las más relevantes de cada sección
-    # para mantener el costo y el tamaño de respuesta acotados; enrich_news muta
-    # los NewsItem in-place, así que el resto de la lista queda intacto.
-    if do_enrich:
-        for section in data:
-            enrich_news(data[section][:12], config)
-
-    # Serializar a dict para JSON
     result = {}
     for section, items in data.items():
         result[section] = [
@@ -502,11 +490,89 @@ def get_news():
             }
             for item in items
         ]
+    return result
 
-    news_cache.set(cache_key, result)
+
+@app.route("/api/news")
+def get_news():
+    """
+    Recolecta noticias de todas las fuentes, las rankea y opcionalmente les
+    agrega contexto de IA.
+    Parámetros:
+      ?enrich=true        → genera contexto con IA (requiere API key)
+      ?enrich=false       → solo títulos y links, sin IA (default)
+      ?section=MERCADOS   → con enrich=true, enriquece SOLO esa sección.
+                            Sin section, enriquece todas (comportamiento legacy).
+      ?max=15             → máximo de noticias por sección
+      ?refresh=true       → ignora el cache: re-recolecta y re-enriquece
+    """
+    do_enrich = request.args.get("enrich", "false") == "true"
+    max_items = int(request.args.get("max", 80))
+    force_refresh = request.args.get("refresh", "false") == "true"
+    section = (request.args.get("section") or "").strip().upper() or None
+
+    if section and section not in NEWS_SECTIONS:
+        return jsonify({"error": f"Sección inválida: {section}. Válidas: {NEWS_SECTIONS}"}), 400
+
+    # 1) Pool base: cache fresco si lo hay, si no re-recolectar
+    base_key = f"base|max={max_items}"
+    result, age = (None, None)
+    if not force_refresh:
+        result, age = news_cache.get(base_key, NEWS_BASE_TTL)
+    from_cache = result is not None
+    if result is None:
+        result = _collect_news_serialized(max_items)
+        news_cache.set(base_key, result)  # se cachea limpio, sin contexto ni marcas
+        age = 0
+
+    # 2) Contexto IA por sección: usa el cache por sección o enriquece las top N
+    enriched_sections = []
+    if do_enrich:
+        targets = [section] if section else NEWS_SECTIONS
+        for sec in targets:
+            items = result.get(sec) or []
+            ctx_map = None
+            if not force_refresh:
+                ctx_map, _ = news_cache.get(f"enriched|{sec}", NEWS_ENRICH_TTL)
+            if not ctx_map:
+                top = items[:NEWS_ENRICH_TOP_N]
+                enrich_items(top, config)
+                ctx_map = {it["url"]: it["context"] for it in top if it.get("context")}
+                # Solo cachear si hubo resultado: un fallo del LLM no debe
+                # quedar cacheado 6 horas
+                if ctx_map:
+                    news_cache.set(f"enriched|{sec}", ctx_map)
+            for it in items:
+                ctx = ctx_map.get(it["url"])
+                if ctx:
+                    it["context"] = ctx
+            if ctx_map:
+                enriched_sections.append(sec)
+
+    port_syms = _portfolio_symbols()
+    watch_syms = {s.upper() for s in db.get_watchlist_symbols()}
     _mark_symbols(result, port_syms, watch_syms)
-    result["_meta"] = {"cached": False, "age_seconds": 0, "enriched": do_enrich}
+    _apply_feedback_and_affinity(result)
+    result["_meta"] = {
+        "cached": from_cache,
+        "age_seconds": age or 0,
+        "enriched": do_enrich,
+        "enriched_sections": enriched_sections,
+    }
     return jsonify(result)
+
+
+@app.route("/api/news/health")
+def news_feed_health():
+    """
+    Estado de salud de las fuentes RSS de noticias (tabla feed_health).
+    Si nunca se corrió el chequeo (o se pide ?refresh=true), lo corre ahora.
+    """
+    force = request.args.get("refresh", "false") == "true"
+    rows = db.get_feed_health()
+    if force or not rows:
+        rows = news_health.check_all_feeds()
+    return jsonify({"sources": rows, "count": len(rows)})
 
 
 def _mark_symbols(result: dict, port_syms: set, watch_syms: set) -> None:
@@ -519,6 +585,93 @@ def _mark_symbols(result: dict, port_syms: set, watch_syms: set) -> None:
             syms = {s.upper() for s in it.get("symbols", [])}
             it["in_portfolio"] = bool(syms & port_syms)
             it["in_watchlist"] = bool(syms & watch_syms)
+
+
+def _apply_feedback_and_affinity(result: dict) -> None:
+    """
+    Mergea el feedback guardado (liked/read, lookup O(1) por url_hash) y
+    calcula relevance_score_personal = relevance_score + affinity_bonus.
+    El score original NO se pisa: el personal es un campo adicional y cada
+    sección se reordena por él. El pool cacheado queda intacto (se cachea
+    limpio antes de este paso).
+    """
+    fb_map = db.get_news_feedback_map()
+    for section, items in result.items():
+        if section.startswith("_"):
+            continue
+        for it in items:
+            fb = fb_map.get(db.news_url_hash(it.get("url") or ""))
+            it["liked"] = bool(fb and fb.get("liked"))
+            it["read"] = bool(fb and fb.get("read"))
+            it["relevance_score_personal"] = round(
+                (it.get("relevance_score") or 0) + affinity_bonus(it), 2
+            )
+        items.sort(key=lambda x: x["relevance_score_personal"], reverse=True)
+
+
+@app.route("/api/news/feedback", methods=["POST"])
+def news_feedback_set():
+    """
+    Registra feedback sobre una noticia (upsert parcial):
+    body {url, title, section, source, symbols, liked?: bool, read?: bool}.
+    Solo pisa los flags presentes en el body. Retorna el estado resultante.
+    """
+    body = request.get_json(silent=True) or {}
+    url = (body.get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "Falta 'url'"}), 400
+    liked, read = body.get("liked"), body.get("read")
+    if liked is None and read is None:
+        return jsonify({"error": "Mandá al menos 'liked' o 'read'"}), 400
+
+    state = db.set_news_feedback(
+        {
+            "url": url,
+            "title": body.get("title") or "",
+            "section": body.get("section") or "",
+            "source": body.get("source") or "",
+            "symbols": body.get("symbols") or [],
+        },
+        liked=bool(liked) if liked is not None else None,
+        read=bool(read) if read is not None else None,
+    )
+    # El próximo /api/news reconstruye el perfil con este feedback incluido
+    invalidate_profile()
+    return jsonify(state)
+
+
+@app.route("/api/news/feedback/stats")
+def news_feedback_stats():
+    """Agregados del feedback de los últimos 90 días para el tablero:
+    por sección (shown_proxy = likes + reads), top fuentes y símbolos likeados."""
+    rows = db.get_feedback_rows(90)
+    by_section, src_likes, sym_likes = {}, {}, {}
+    for r in rows:
+        sec = r.get("section") or "SIN_SECCION"
+        agg = by_section.setdefault(sec, {"shown_proxy": 0, "likes": 0, "reads": 0})
+        if r.get("liked"):
+            agg["likes"] += 1
+            src = r.get("source") or "?"
+            src_likes[src] = src_likes.get(src, 0) + 1
+            for s in r.get("symbols") or []:
+                s = (s or "").strip().upper()
+                if s:
+                    sym_likes[s] = sym_likes.get(s, 0) + 1
+        if r.get("read"):
+            agg["reads"] += 1
+        agg["shown_proxy"] = agg["likes"] + agg["reads"]
+
+    top = lambda d, key: [
+        {key: k, "likes": v}
+        for k, v in sorted(d.items(), key=lambda kv: kv[1], reverse=True)[:10]
+    ]
+    return jsonify({
+        "days": 90,
+        "total_items": len(rows),
+        "by_section": by_section,
+        "top_sources_liked": top(src_likes, "source"),
+        "top_symbols_liked": top(sym_likes, "symbol"),
+    })
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────

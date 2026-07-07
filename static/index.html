@@ -531,6 +531,59 @@
       margin-top: 2px;
     }
     .star-btn { font-size: 13px; }
+
+    /* ── Feedback de noticias (like / leída) ── */
+    .news-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 7px;
+    }
+    .news-fb-btn {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,.1);
+      color: var(--text-muted);
+      border-radius: 6px;
+      padding: 2px 9px;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: color .15s, border-color .15s, background .15s;
+      line-height: 1.6;
+    }
+    .news-fb-btn:hover {
+      color: rgba(255,255,255,.75);
+      border-color: rgba(255,255,255,.28);
+    }
+    .news-fb-btn.like.active {
+      color: rgba(163,230,53,.9);
+      border-color: rgba(163,230,53,.35);
+      background: rgba(163,230,53,.1);
+    }
+    .news-fb-btn.read-toggle.active {
+      color: rgba(96,165,250,.9);
+      border-color: rgba(96,165,250,.3);
+      background: rgba(96,165,250,.08);
+    }
+    .news-card.is-read { opacity: .55; }
+    .news-card.is-read:hover { opacity: .8; }
+    .news-read-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 4px 4px;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+    }
+    .news-read-bar .news-fb-btn.active {
+      color: rgba(255,255,255,.75);
+      border-color: rgba(255,255,255,.3);
+      background: rgba(255,255,255,.06);
+    }
+    .news-read-hidden-count {
+      color: var(--text-faint);
+      font-size: 11px;
+      font-family: var(--mono);
+    }
     .watch-card {
       cursor: pointer;
       background: var(--surface2);
@@ -752,11 +805,21 @@
           <button class="btn btn-outline btn-sm" onclick="addCompareFromInput()">+ Agregar</button>
           <button class="btn btn-primary" onclick="runCompare()">⚖️ Comparar</button>
         </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:12px">
+          <span style="color:var(--text-faint);font-size:12px;margin-right:4px">Período:</span>
+          <button class="btn btn-outline btn-sm compare-period-chip" data-period="1mo" onclick="setComparePeriod('1mo')">1M</button>
+          <button class="btn btn-outline btn-sm compare-period-chip" data-period="3mo" onclick="setComparePeriod('3mo')">3M</button>
+          <button class="btn btn-outline btn-sm compare-period-chip" data-period="6mo" onclick="setComparePeriod('6mo')">6M</button>
+          <button class="btn btn-primary btn-sm compare-period-chip" data-period="1y" onclick="setComparePeriod('1y')">1A</button>
+          <button class="btn btn-outline btn-sm compare-period-chip" data-period="2y" onclick="setComparePeriod('2y')">2A</button>
+          <button class="btn btn-outline btn-sm compare-period-chip" data-period="5y" onclick="setComparePeriod('5y')">5A</button>
+          <button class="btn btn-outline btn-sm compare-period-chip" data-period="max" onclick="setComparePeriod('max')">Max</button>
+        </div>
       </div>
 
       <div id="compare-loading" style="display:none" class="loading-overlay"><div class="spinner"></div> Cargando datos...</div>
       <div id="compare-results" style="display:none;margin-bottom:20px">
-        <div class="grid-2" style="margin-bottom:0">
+        <div class="grid-2">
           <div class="card">
             <div class="card-title">Retorno normalizado (base 100)</div>
             <canvas id="chart-compare"></canvas>
@@ -764,6 +827,17 @@
           <div class="card">
             <div class="card-title">Métricas clave</div>
             <div id="compare-metrics-table"></div>
+          </div>
+        </div>
+        <div class="grid-2" style="margin-bottom:0">
+          <div class="card">
+            <div class="card-title">Drawdown desde máximos</div>
+            <canvas id="chart-compare-drawdown"></canvas>
+          </div>
+          <div class="card" id="compare-correlation-card">
+            <div class="card-title">Correlación de retornos diarios</div>
+            <div id="compare-correlation" style="overflow-x:auto"></div>
+            <div style="color:var(--text-faint);font-size:11px;margin-top:8px">Correlación alta entre activos = diversificación falsa.</div>
           </div>
         </div>
       </div>
@@ -999,8 +1073,8 @@
       <div class="page-title">📰 Noticias</div>
 
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:18px;flex-wrap:wrap">
-        <button class="btn btn-outline btn-sm" onclick="loadNews(false, true)">🔄 Actualizar</button>
-        <button class="btn btn-primary btn-sm" onclick="loadNews(true, true)" title="Genera contexto con Haiku (~$0.01)">✨ Contexto IA</button>
+        <button class="btn btn-outline btn-sm" onclick="loadNews(true)">🔄 Actualizar</button>
+        <button id="btn-news-ai" class="btn btn-primary btn-sm" onclick="enrichCurrentTab()" disabled title="Elegí una sección para generar contexto IA">🤖 Contexto IA</button>
         <span id="news-status" style="color:var(--text-faint);font-size:11px;margin-left:auto;font-family:var(--mono)"></span>
       </div>
 
@@ -1049,6 +1123,17 @@
         <div class="card">
           <div class="card-title">🤖 Estado del proveedor IA</div>
           <div id="ai-status"><div class="loading-overlay" style="padding:12px"><div class="spinner"></div> Consultando estado...</div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">📰 Salud de fuentes de noticias</div>
+          <p style="color:var(--text-muted);margin-bottom:12px;line-height:1.6">
+            Estado de cada feed RSS del sistema de noticias. El chequeo automático corre todos los lunes a las 08:00.
+          </p>
+          <div id="feed-health"><div class="loading-overlay" style="padding:12px"><div class="spinner"></div> Consultando estado...</div></div>
+          <div style="margin-top:12px">
+            <button id="btn-feed-health" class="btn btn-outline btn-sm" onclick="loadFeedHealth(true)">🔄 Chequear ahora</button>
+          </div>
         </div>
 
         <div class="card">
@@ -1179,6 +1264,7 @@ let portfolioData = null;
 let watchlistData = [];
 let watchlistSet = new Set();
 let compareChart = null;
+let compareDrawdownChart = null;
 let allocationChart = null;
 let evolutionChart = null;
 let detailChart = null;
@@ -1196,7 +1282,7 @@ function navigate(page) {
   if (page === 'alertas') { loadAlerts(); loadSmartHistory(); pollUnseenBadge(); }
   // Noticias: carga automática solo si no hay datos aún (usa caché)
   if (page === 'news' && newsTotal() === 0) loadNews(false);
-  if (page === 'setup') loadAIStatus();
+  if (page === 'setup') { loadAIStatus(); loadFeedHealth(); }
   window.scrollTo(0, 0);
 }
 
@@ -1474,21 +1560,34 @@ async function loadHoyNews() {
     if (newsTotal() === 0) {
       const resp = await fetch('/api/news?enrich=false&max=80');
       _newsData = await resp.json();
+      syncNewsFeedbackFromData();
       renderCurrentNews();
     }
-    const list = portfolioNewsList().slice(0, 5);
-    if (!list.length) {
-      el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">Ninguna noticia reciente menciona activos de tu portfolio o watchlist.</div>';
-      return;
-    }
-    el.innerHTML = list.map(n => `
-      <div style="padding:10px 4px;border-bottom:1px solid var(--border-soft)">
-        <a href="${n.url}" target="_blank" rel="noopener" style="color:rgba(255,255,255,0.82);text-decoration:none;font-weight:500;font-size:13.5px;line-height:1.45">${n.title}</a>
-        <div class="news-meta" style="margin:4px 0 0">${n.source} · ${n.published}${n.symbols && n.symbols.length ? ' · ' + n.symbols.map(s => '$' + s).join(' ') : ''}</div>
-      </div>`).join('');
+    renderHoyNews();
   } catch(e) {
     el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">⚠️ No se pudieron cargar las noticias.</div>';
   }
+}
+
+function renderHoyNews() {
+  // Bloque "Noticias de tus activos" en Hoy, con los mismos botones de feedback
+  const el = document.getElementById('hoy-news-list');
+  if (!el || newsTotal() === 0) return;
+  const list = portfolioNewsList().slice(0, 5);
+  if (!list.length) {
+    el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">Ninguna noticia reciente menciona activos de tu portfolio o watchlist.</div>';
+    return;
+  }
+  el.innerHTML = list.map(n => {
+    const k = newsKey(n);
+    const fb = fbState(n.url);
+    return `
+      <div style="padding:10px 4px;border-bottom:1px solid var(--border-soft);${fb.read ? 'opacity:.55' : ''}">
+        <a href="${n.url}" target="_blank" rel="noopener" onclick="markNewsReadOnOpen(${k})" style="color:rgba(255,255,255,0.82);text-decoration:none;font-weight:500;font-size:13.5px;line-height:1.45">${n.title}</a>
+        <div class="news-meta" style="margin:4px 0 0">${n.source} · ${n.published}${n.symbols && n.symbols.length ? ' · ' + n.symbols.map(s => '$' + s).join(' ') : ''}</div>
+        ${newsFeedbackButtonsHtml(n)}
+      </div>`;
+  }).join('');
 }
 
 // ── Watchlist ─────────────────────────────────────────────────────────────────
@@ -1862,80 +1961,162 @@ function renderCompareChips() {
     `<span class="chip">${s}<button onclick="removeFromCompare('${s}')" title="Quitar">✕</button></span>`).join('');
 }
 
-async function runCompare() {
+let comparePeriod = '1y';
+
+function setComparePeriod(period) {
+  comparePeriod = period;
+  document.querySelectorAll('.compare-period-chip').forEach(btn => {
+    btn.className = btn.dataset.period === period
+      ? 'btn btn-primary btn-sm compare-period-chip'
+      : 'btn btn-outline btn-sm compare-period-chip';
+  });
+  // Si ya hay una comparación en pantalla, re-fetch y re-render con el nuevo período
+  if (document.getElementById('compare-results').style.display !== 'none' && compareSymbols.length >= 2) {
+    runCompare(false);
+  }
+}
+
+async function runCompare(scroll = true) {
   if (compareSymbols.length < 2) { showToast('⚠️ Agregá al menos 2 símbolos a la bandeja'); return; }
 
   document.getElementById('compare-results').style.display = 'none';
   document.getElementById('compare-loading').style.display = 'flex';
 
   try {
-    const resp = await fetch(`/api/compare?symbols=${encodeURIComponent(compareSymbols.join(','))}`);
+    const resp = await fetch(`/api/compare?symbols=${encodeURIComponent(compareSymbols.join(','))}&period=${encodeURIComponent(comparePeriod)}`);
     const data = await resp.json();
     document.getElementById('compare-loading').style.display = 'none';
-    renderComparison(data);
+    if (!resp.ok) { showToast(`❌ ${data.error || 'Error al comparar'}`); return; }
+    renderComparison(data, scroll);
   } catch(e) {
     document.getElementById('compare-loading').style.display = 'none';
     showToast('❌ Error al comparar');
   }
 }
 
-function renderComparison(data) {
-  const ctx = document.getElementById('chart-compare').getContext('2d');
-  if (compareChart) compareChart.destroy();
+// Opciones compartidas de los charts de comparación (estilo de la app)
+function compareChartOptions(yTickCallback) {
+  return {
+    responsive: true,
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { labels: { color: 'rgba(255,255,255,0.6)' } } },
+    scales: {
+      x: { ticks: { color: 'rgba(255,255,255,0.3)', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+      y: { ticks: { color: 'rgba(255,255,255,0.3)', callback: yTickCallback }, grid: { color: 'rgba(255,255,255,0.05)' } }
+    }
+  };
+}
 
+function renderComparison(data, scroll = true) {
   const colors = ['#a3e635','#22d3ee','#fb923c','#e879f9','#4ade80','#fbbf24'];
-  const datasets = [];
   const history = data.history || {};
+  const syms = Object.keys(history); // mismo orden (y color) en ambos charts
+  const colorOf = sym => colors[syms.indexOf(sym) % colors.length];
 
-  Object.entries(history).forEach(([sym, h], i) => {
-    datasets.push({
-      label: sym,
-      data: h.normalized,
-      borderColor: colors[i % colors.length],
-      backgroundColor: 'transparent',
-      borderWidth: 2,
-      pointRadius: 0,
-    });
-  });
+  // Símbolos sin datos: se avisa pero la comparación sigue
+  const errored = Object.keys(data.errors || {});
+  if (errored.length) showToast(`⚠️ Sin datos para: ${errored.join(', ')}`);
 
-  const firstKey = Object.keys(history)[0];
+  const firstKey = syms[0];
   const labels = firstKey ? history[firstKey].dates : [];
 
+  // Chart normalizado (base 100)
+  const ctx = document.getElementById('chart-compare').getContext('2d');
+  if (compareChart) compareChart.destroy();
   compareChart = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { labels: { color: 'rgba(255,255,255,0.6)' } } },
-      scales: {
-        x: { ticks: { color: 'rgba(255,255,255,0.3)', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.05)' } },
-        y: { ticks: { color: 'rgba(255,255,255,0.3)', callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.05)' } }
-      }
-    }
+    data: {
+      labels,
+      datasets: syms.map(sym => ({
+        label: sym,
+        data: history[sym].normalized,
+        borderColor: colorOf(sym),
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointRadius: 0,
+      }))
+    },
+    options: compareChartOptions(v => v + '%')
   });
 
-  // Métricas table
+  // Chart de drawdown (% de caída desde el máximo acumulado, siempre ≤ 0)
+  const ddCtx = document.getElementById('chart-compare-drawdown').getContext('2d');
+  if (compareDrawdownChart) compareDrawdownChart.destroy();
+  const ddOptions = compareChartOptions(v => v + '%');
+  ddOptions.scales.y.suggestedMax = 0;
+  compareDrawdownChart = new Chart(ddCtx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: syms.map(sym => ({
+        label: sym,
+        data: history[sym].drawdown,
+        borderColor: colorOf(sym),
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointRadius: 0,
+      }))
+    },
+    options: ddOptions
+  });
+
+  // Métricas table (todas calculadas sobre el período pedido)
   const metrics = data.metrics || {};
   const rows = Object.entries(metrics).map(([sym, m]) => `
     <tr>
       <td><strong>${sym}</strong></td>
-      <td>${fmtPct(m.return_1y)}</td>
-      <td>${fmt(m.volatility_1y)}%</td>
-      <td>${fmt(m.sharpe_approx, 2)}</td>
-      <td>${m.pe_ratio ? fmt(m.pe_ratio, 1) : '—'}</td>
-      <td>${m.sector || '—'}</td>
+      <td>${fmtPct(m.return_pct)}</td>
+      <td>${fmt(m.volatility_pct)}%</td>
+      <td><span class="${m.sharpe_approx >= 0 ? 'positive' : 'negative'}">${fmt(m.sharpe_approx)}</span></td>
+      <td><span style="color:rgba(248,113,113,0.8)">${fmt(m.max_drawdown_pct)}%</span></td>
+      <td>${m.beta_vs_spy != null ? fmt(m.beta_vs_spy) : '—'}</td>
     </tr>`).join('');
 
   document.getElementById('compare-metrics-table').innerHTML = `
     <table>
-      <thead><tr><th>Símbolo</th><th>Retorno</th><th>Volatilidad</th><th>Sharpe</th><th>P/E</th><th>Sector</th></tr></thead>
+      <thead><tr><th>Símbolo</th><th>Retorno</th><th>Volatilidad</th><th>Sharpe</th><th>Max DD</th><th>Beta vs SPY</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 
+  renderCorrelationMatrix(data.correlation || {});
+
   const results = document.getElementById('compare-results');
   results.style.display = 'block';
-  results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (scroll) results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderCorrelationMatrix(correlation) {
+  const card = document.getElementById('compare-correlation-card');
+  const syms = Object.keys(correlation);
+  if (syms.length < 2) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  // Color por intensidad: |r| < 0.4 verde (buena diversificación),
+  // 0.4–0.7 amarillo, > 0.7 rojo (alta correlación). Diagonal en gris.
+  const cellStyle = (a, b, r) => {
+    if (a === b) return 'background:rgba(255,255,255,0.06);color:var(--text-muted)';
+    if (r == null) return 'color:var(--text-faint)';
+    const abs = Math.abs(r);
+    if (abs < 0.4) return 'background:rgba(74,222,128,0.12);color:var(--green)';
+    if (abs <= 0.7) return 'background:rgba(251,191,36,0.12);color:var(--yellow)';
+    return 'background:rgba(248,113,113,0.15);color:var(--red)';
+  };
+
+  const header = syms.map(s => `<th style="text-align:center">${s}</th>`).join('');
+  const body = syms.map(a => `
+    <tr>
+      <td><strong>${a}</strong></td>
+      ${syms.map(b => {
+        const r = a === b ? 1 : (correlation[a] || {})[b];
+        return `<td style="text-align:center;font-family:var(--mono);${cellStyle(a, b, r)}">${r == null ? '—' : fmt(r)}</td>`;
+      }).join('')}
+    </tr>`).join('');
+
+  document.getElementById('compare-correlation').innerHTML = `
+    <table>
+      <thead><tr><th></th>${header}</tr></thead>
+      <tbody>${body}</tbody>
+    </table>`;
 }
 
 // ── Alertas: tabs de sección (mis / smart / track) ────────────────────────────
@@ -2548,10 +2729,119 @@ async function saveSmartConfig() {
 
 const NEWS_SECTIONS = ['TECH_IA', 'IA_TECNICA', 'STARTUPS', 'VOCES', 'MERCADOS'];
 const NEWS_TABS = ['PORTFOLIO', ...NEWS_SECTIONS];   // PORTFOLIO agrega las in_portfolio de todas
+const NEWS_SECTION_LABELS = {
+  TECH_IA: 'Tech/IA', IA_TECNICA: 'IA Técnica', STARTUPS: 'Startups',
+  VOCES: 'Voces IA', MERCADOS: 'Mercados',
+};
 const NEWS_PAGE = 40;  // cuántas se muestran por sección antes de "Cargar más"
 let _newsData = { TECH_IA: [], IA_TECNICA: [], STARTUPS: [], VOCES: [], MERCADOS: [] };
 let _newsTab = 'PORTFOLIO';
 let _newsShown = {};   // por sección: cuántas se están mostrando
+let _newsEnriching = false;  // hay un enriquecimiento IA en curso
+let _newsShowRead = {};      // por sección: si se muestran las leídas (default: ocultas)
+
+// ── Feedback de noticias (like / leída) ────────────────────────────────────
+// Estado global por URL, cargado con las noticias (vienen con liked/read del
+// backend) y actualizado de forma optimista al togglear (revert si falla).
+const newsFeedback = {};          // url -> {liked, read}
+const _newsKeyToItem = [];        // registro item por clave numérica (para onclick
+const _newsUrlToKey = {};         //   sin interpolar URLs dentro del HTML)
+
+function newsKey(n) {
+  if (_newsUrlToKey[n.url] === undefined) {
+    _newsUrlToKey[n.url] = _newsKeyToItem.length;
+    _newsKeyToItem.push(n);
+  } else {
+    _newsKeyToItem[_newsUrlToKey[n.url]] = n;  // refresca la referencia tras un reload
+  }
+  return _newsUrlToKey[n.url];
+}
+
+function fbState(url) {
+  return newsFeedback[url] || { liked: false, read: false };
+}
+
+function syncNewsFeedbackFromData() {
+  NEWS_SECTIONS.forEach(sec => (_newsData[sec] || []).forEach(n => {
+    newsFeedback[n.url] = { liked: !!n.liked, read: !!n.read };
+  }));
+}
+
+function newsScore(n) {
+  // Score personalizado (con afinidad) si el backend lo mandó; si no, el base
+  return n.relevance_score_personal != null ? n.relevance_score_personal : (n.relevance_score || 0);
+}
+
+async function sendNewsFeedback(n, patch) {
+  const resp = await fetch('/api/news/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      url: n.url, title: n.title, section: n.section || '',
+      source: n.source || '', symbols: n.symbols || [], ...patch,
+    }),
+  });
+  if (!resp.ok) throw new Error('feedback HTTP ' + resp.status);
+  return resp.json();
+}
+
+function rerenderNewsEverywhere() {
+  renderCurrentNews();
+  renderHoyNews();
+}
+
+async function toggleNewsLike(key) {
+  const n = _newsKeyToItem[key];
+  if (!n) return;
+  const prev = { ...fbState(n.url) };
+  newsFeedback[n.url] = { ...prev, liked: !prev.liked };
+  rerenderNewsEverywhere();
+  try {
+    await sendNewsFeedback(n, { liked: !prev.liked });
+  } catch (e) {
+    console.error(e);
+    newsFeedback[n.url] = prev;   // revert optimista
+    rerenderNewsEverywhere();
+  }
+}
+
+async function toggleNewsRead(key) {
+  const n = _newsKeyToItem[key];
+  if (!n) return;
+  const prev = { ...fbState(n.url) };
+  newsFeedback[n.url] = { ...prev, read: !prev.read };
+  rerenderNewsEverywhere();
+  try {
+    await sendNewsFeedback(n, { read: !prev.read });
+  } catch (e) {
+    console.error(e);
+    newsFeedback[n.url] = prev;
+    rerenderNewsEverywhere();
+  }
+}
+
+function markNewsReadOnOpen(key) {
+  // Al abrir el link: marcado automático como leída, sin bloquear la navegación
+  // (el link abre en otra pestaña; el re-render se difiere para no interferir)
+  const n = _newsKeyToItem[key];
+  if (!n) return;
+  const prev = fbState(n.url);
+  if (prev.read) return;
+  newsFeedback[n.url] = { ...prev, read: true };
+  sendNewsFeedback(n, { read: true }).catch(e => console.error(e));
+  setTimeout(rerenderNewsEverywhere, 150);
+}
+
+function toggleShowRead(section) {
+  _newsShowRead[section] = !_newsShowRead[section];
+  renderNewsSection(section);
+}
+
+function isHiddenRead(n) {
+  // Las leídas se ocultan por default, pero las likeadas se muestran siempre
+  const f = fbState(n.url);
+  return f.read && !f.liked;
+}
 
 function newsTotal() {
   return NEWS_SECTIONS.reduce((s, sec) => s + (_newsData[sec] || []).length, 0);
@@ -2564,7 +2854,7 @@ function portfolioNewsList() {
   NEWS_SECTIONS.forEach(sec => (_newsData[sec] || []).forEach(n => {
     if ((n.in_portfolio || n.in_watchlist) && !seen.has(n.url)) { seen.add(n.url); out.push(n); }
   }));
-  out.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
+  out.sort((a, b) => newsScore(b) - newsScore(a));
   return out;
 }
 
@@ -2574,9 +2864,90 @@ function switchNewsTab(tab) {
     document.getElementById('news-' + s).style.display = s === tab ? 'block' : 'none';
     document.getElementById('ntab-' + s).classList.toggle('active', s === tab);
   });
+  updateNewsAIButton();
+}
+
+function updateNewsAIButton() {
+  // El botón de contexto IA actúa sobre el tab activo. En "⭐ Míos" se
+  // deshabilita: sus noticias vienen mezcladas de todas las secciones.
+  const btn = document.getElementById('btn-news-ai');
+  if (!btn || _newsEnriching) return;
+  if (_newsTab === 'PORTFOLIO') {
+    btn.disabled = true;
+    btn.textContent = '🤖 Contexto IA';
+    btn.title = 'Elegí una sección para generar contexto IA';
+  } else {
+    btn.disabled = false;
+    btn.textContent = `🤖 Contexto IA para ${NEWS_SECTION_LABELS[_newsTab] || _newsTab}`;
+    btn.title = `Genera contexto con IA solo para ${NEWS_SECTION_LABELS[_newsTab] || _newsTab} (~$0.01)`;
+  }
+}
+
+async function enrichCurrentTab() {
+  const sec = _newsTab;
+  if (sec === 'PORTFOLIO' || _newsEnriching) return;
+
+  const btn = document.getElementById('btn-news-ai');
+  const status = document.getElementById('news-status');
+  const el = document.getElementById('news-' + sec);
+  _newsEnriching = true;
+  btn.disabled = true;
+  btn.textContent = '⏳ Generando contexto...';
+  // Estado de carga solo en la sección activa, sin ocultar las noticias
+  el.insertAdjacentHTML('afterbegin',
+    `<div id="news-ai-loading" class="loading-overlay" style="padding:14px;font-size:13px;color:var(--text-muted)">
+       <div class="spinner"></div> Generando contexto IA para ${NEWS_SECTION_LABELS[sec]}...
+     </div>`);
+
+  try {
+    const resp = await fetch(`/api/news?enrich=true&section=${sec}&max=80`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    // Merge del contexto en el estado JS por URL: el enriquecimiento queda en
+    // _newsData y sobrevive a los cambios de tab (no se re-fetchea al volver)
+    const ctxByUrl = {};
+    (data[sec] || []).forEach(n => { if (n.context) ctxByUrl[n.url] = n.context; });
+    if ((_newsData[sec] || []).length) {
+      _newsData[sec].forEach(n => { if (ctxByUrl[n.url]) n.context = ctxByUrl[n.url]; });
+    } else {
+      _newsData[sec] = data[sec] || [];
+    }
+
+    renderNewsSection(sec);
+    renderNewsSection('PORTFOLIO');  // "Míos" comparte items con las secciones
+
+    const nCtx = Object.keys(ctxByUrl).length;
+    status.textContent = nCtx
+      ? `✨ Contexto IA generado para ${NEWS_SECTION_LABELS[sec]} (${nCtx} noticias)`
+      : `⚠️ La IA no devolvió contexto para ${NEWS_SECTION_LABELS[sec]} — probá de nuevo`;
+  } catch (e) {
+    console.error(e);
+    const loading = document.getElementById('news-ai-loading');
+    if (loading) loading.remove();
+    status.textContent = `❌ Error generando contexto IA para ${NEWS_SECTION_LABELS[sec]}`;
+  } finally {
+    _newsEnriching = false;
+    updateNewsAIButton();
+  }
+}
+
+function newsFeedbackButtonsHtml(n) {
+  const k = newsKey(n);
+  const fb = fbState(n.url);
+  return `
+    <div class="news-actions">
+      <button class="news-fb-btn like ${fb.liked ? 'active' : ''}" onclick="toggleNewsLike(${k})"
+        title="${fb.liked ? 'Quitar me gusta' : 'Me gusta: mejora el ranking de noticias parecidas'}">👍${fb.liked ? ' Te gusta' : ''}</button>
+      <button class="news-fb-btn read-toggle ${fb.read ? 'active' : ''}" onclick="toggleNewsRead(${k})"
+        title="${fb.read ? 'Marcar como no leída' : 'Marcar como leída'}">✓ Leída</button>
+    </div>`;
 }
 
 function newsCardHtml(n) {
+  const k = newsKey(n);
+  const fb = fbState(n.url);
+
   const symbolsHtml = n.symbols && n.symbols.length
     ? `<div class="news-symbols">${n.symbols.map(s =>
         `<span class="${n.in_portfolio ? 'in-port' : ''}">$${s}</span>`).join('')}</div>`
@@ -2595,10 +2966,10 @@ function newsCardHtml(n) {
     : '';
 
   return `
-    <div class="news-card ${n.in_portfolio ? 'portfolio-hit' : (n.in_watchlist ? 'watchlist-hit' : '')}">
+    <div class="news-card ${n.in_portfolio ? 'portfolio-hit' : (n.in_watchlist ? 'watchlist-hit' : '')} ${fb.read ? 'is-read' : ''}">
       <div class="news-card-header">
         <div class="news-title" style="flex:1">
-          <a href="${n.url}" target="_blank" rel="noopener">${n.title}</a>
+          <a href="${n.url}" target="_blank" rel="noopener" onclick="markNewsReadOnOpen(${k})">${n.title}</a>
         </div>
         ${portBadge}
         ${watchBadge}
@@ -2606,25 +2977,40 @@ function newsCardHtml(n) {
       <div class="news-meta">${n.source} · ${n.published}</div>
       ${symbolsHtml}
       ${contextHtml}
+      ${newsFeedbackButtonsHtml(n)}
     </div>`;
 }
 
 function renderNewsSection(section) {
   const el = document.getElementById('news-' + section);
   if (!el) return;
-  const list = section === 'PORTFOLIO' ? portfolioNewsList() : (_newsData[section] || []);
+  const all = section === 'PORTFOLIO' ? portfolioNewsList() : (_newsData[section] || []);
+
+  // Leídas ocultas por default (salvo las likeadas, que se muestran siempre)
+  const showRead = !!_newsShowRead[section];
+  const hiddenCount = all.filter(isHiddenRead).length;
+  const list = showRead ? all : all.filter(n => !isHiddenRead(n));
+
+  let readBar = '';
+  if (hiddenCount > 0 || showRead) {
+    readBar = `<div class="news-read-bar">
+      <button class="news-fb-btn ${showRead ? 'active' : ''}" onclick="toggleShowRead('${section}')">
+        👁 ${showRead ? 'Ocultar leídas' : 'Mostrar leídas'}</button>
+      ${!showRead && hiddenCount ? `<span class="news-read-hidden-count">(${hiddenCount} leída${hiddenCount === 1 ? '' : 's'} oculta${hiddenCount === 1 ? '' : 's'})</span>` : ''}
+    </div>`;
+  }
 
   if (!list.length) {
     const msg = section === 'PORTFOLIO'
       ? 'Ninguna noticia reciente menciona activos de tu portfolio o watchlist'
-      : 'No se encontraron noticias';
-    el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-muted)">${msg}</div>`;
+      : (hiddenCount ? 'Todas las noticias de esta sección están marcadas como leídas' : 'No se encontraron noticias');
+    el.innerHTML = readBar + `<div style="padding:40px;text-align:center;color:var(--text-muted)">${msg}</div>`;
     return;
   }
 
   const shown = _newsShown[section] || NEWS_PAGE;
   const slice = list.slice(0, shown);
-  let html = slice.map(newsCardHtml).join('');
+  let html = readBar + slice.map(newsCardHtml).join('');
   if (list.length > shown) {
     const rest = list.length - shown;
     html += `<div style="text-align:center;margin:16px 0">
@@ -2643,9 +3029,9 @@ function renderCurrentNews() {
   NEWS_TABS.forEach(renderNewsSection);
 }
 
-async function loadNews(withAI = false, forceRefresh = false) {
+async function loadNews(forceRefresh = false) {
   const status = document.getElementById('news-status');
-  status.textContent = withAI ? '⏳ Recolectando y analizando con IA...' : '⏳ Recolectando noticias...';
+  status.textContent = '⏳ Recolectando noticias...';
   _newsShown = {};  // reset paginación
 
   NEWS_TABS.forEach(s => {
@@ -2654,12 +3040,15 @@ async function loadNews(withAI = false, forceRefresh = false) {
   });
 
   try {
-    const url = `/api/news?enrich=${withAI}&max=80${forceRefresh ? '&refresh=true' : ''}`;
+    const url = `/api/news?enrich=false&max=80${forceRefresh ? '&refresh=true' : ''}`;
     const resp = await fetch(url);
     const data = await resp.json();
 
     _newsData = data;
+    syncNewsFeedbackFromData();
     renderCurrentNews();
+    renderHoyNews();
+    updateNewsAIButton();
 
     const meta = data._meta || {};
     let freshness;
@@ -2669,8 +3058,7 @@ async function loadNews(withAI = false, forceRefresh = false) {
     } else {
       freshness = 'recién actualizado';
     }
-    const aiTag = meta.enriched ? ' · ✨ con contexto IA' : '';
-    status.textContent = `${newsTotal()} noticias · ${freshness}${aiTag}`;
+    status.textContent = `${newsTotal()} noticias · ${freshness}`;
 
   } catch(e) {
     status.textContent = '❌ Error al cargar noticias';
@@ -2699,6 +3087,48 @@ async function loadAIStatus() {
       </div>`;
   } catch(e) {
     el.innerHTML = '<div style="color:var(--yellow);font-size:13px">⚠️ No se pudo consultar el estado del proveedor IA.</div>';
+  }
+}
+
+// ── Ajustes: salud de las fuentes de noticias ─────────────────────────────────
+async function loadFeedHealth(force = false) {
+  const el = document.getElementById('feed-health');
+  const btn = document.getElementById('btn-feed-health');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Chequeando...'; }
+  el.innerHTML = `<div class="loading-overlay" style="padding:12px"><div class="spinner"></div> ${force ? 'Chequeando todas las fuentes (puede tardar un rato)...' : 'Consultando estado...'}</div>`;
+  try {
+    const resp = await fetch(`/api/news/health${force ? '?refresh=true' : ''}`);
+    const data = await resp.json();
+    const rows = data.sources || [];
+    if (!rows.length) {
+      el.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Sin datos todavía — presioná "Chequear ahora".</div>';
+      return;
+    }
+    const down = rows.filter(r => r.status !== 'ok').length;
+    const rowsHtml = rows.map(r => {
+      const estado = r.status === 'ok'
+        ? `<span style="color:var(--green)">🟢 ok</span> <span style="color:var(--text-faint)">(${r.entries})</span>`
+        : `<span style="color:var(--red)">🔴 caída</span> <span style="color:var(--text-faint)">· último ok: ${r.last_ok ? r.last_ok.slice(0, 10) : 'nunca'}</span>`;
+      return `<tr>
+        <td style="padding:4px 8px 4px 0">${r.source_name}</td>
+        <td style="padding:4px 8px 4px 0;color:var(--text-muted);font-family:var(--mono);font-size:11px">${r.section}</td>
+        <td style="padding:4px 0;white-space:nowrap">${estado}</td>
+      </tr>`;
+    }).join('');
+    const checked = rows[0].last_checked ? rows[0].last_checked.replace('T', ' ') : '—';
+    el.innerHTML = `
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">
+        ${rows.length} fuentes · ${down ? `<span style="color:var(--red)">${down} caída${down > 1 ? 's' : ''}</span>` : '<span style="color:var(--green)">todas OK</span>'}
+        · último chequeo: <span style="font-family:var(--mono)">${checked}</span>
+      </div>
+      <div style="max-height:260px;overflow-y:auto;overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">${rowsHtml}</table>
+      </div>`;
+  } catch (e) {
+    console.error(e);
+    el.innerHTML = '<div style="color:var(--yellow);font-size:13px">⚠️ No se pudo consultar la salud de las fuentes.</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Chequear ahora'; }
   }
 }
 

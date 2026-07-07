@@ -11,6 +11,8 @@ Jobs:
   corrida inmediata al arrancar si todavía no hay snapshot de hoy.
 - Backup diario de la DB: todos los días a las 18:45 (después del snapshot),
   y una corrida inmediata al arrancar si todavía no hay backup de hoy.
+- Health check de fuentes de noticias: todos los lunes a las 08:00. Persiste
+  el estado de cada feed RSS en la tabla feed_health (visible en Ajustes).
 
 Todos los jobs capturan sus excepciones y las loggean: jamás tumban el server.
 """
@@ -157,6 +159,22 @@ def daily_backup_job():
         logger.exception("Error en job de backup diario de la DB")
 
 
+# ── Job: health check de fuentes de noticias ─────────────────────────────────
+
+def feed_health_job():
+    """Chequea todas las fuentes RSS de noticias y persiste su estado. Nunca crashea."""
+    try:
+        from modules.news.health import check_all_feeds
+        results = check_all_feeds()
+        down = [r["source_name"] for r in results if r["status"] != "ok"]
+        if down:
+            logger.warning("Health check de feeds: %d fuentes caídas: %s", len(down), down)
+        else:
+            logger.info("Health check de feeds: %d fuentes OK", len(results))
+    except Exception:
+        logger.exception("Error en job de health check de feeds")
+
+
 # ── Inicialización ───────────────────────────────────────────────────────────
 
 def init_scheduler():
@@ -182,6 +200,10 @@ def init_scheduler():
     # Backup diario de la DB a las 18:45 (después del snapshot)
     sched.add_job(daily_backup_job, CronTrigger(hour=18, minute=45),
                   id="daily_backup", max_instances=1, coalesce=True)
+
+    # Health check semanal de fuentes de noticias: lunes 08:00
+    sched.add_job(feed_health_job, CronTrigger(day_of_week="mon", hour=8, minute=0),
+                  id="feed_health", max_instances=1, coalesce=True)
 
     sched.start()
     _scheduler = sched

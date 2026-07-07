@@ -1,10 +1,13 @@
 """
 News Enricher — genera contexto para noticias usando AIProvider.
 Usa el tier "fast" (modelo ligero) para mantener velocidad y bajo costo.
+
+Trabaja sobre noticias ya serializadas (dicts con title/source/summary/url),
+que es como viven en el cache del endpoint: así se puede enriquecer una
+sección puntual sin re-recolectar ni reconstruir objetos NewsItem.
 """
 
 import json
-from modules.news.models import NewsItem
 from modules.ai_provider import AIProvider
 
 
@@ -20,10 +23,11 @@ Noticias:
 {noticias}"""
 
 
-def enrich_news(items: list[NewsItem], cfg) -> list[NewsItem]:
+def enrich_items(items: list[dict], cfg) -> list[dict]:
     """
-    Enriquece una lista de noticias con contexto de IA.
-    Retorna la misma lista con el campo `context` completado.
+    Enriquece una lista de noticias (dicts serializados) con contexto de IA.
+    Muta cada dict completando el campo `context` y retorna la misma lista.
+    Si el proveedor no está configurado o falla, deja los items sin tocar.
     """
     if not items:
         return items
@@ -41,8 +45,8 @@ def enrich_news(items: list[NewsItem], cfg) -> list[NewsItem]:
         return items
 
     noticias_texto = "\n".join(
-        f"{i+1}. [{item.source}] {item.title}"
-        + (f"\nResumen: {item.summary[:200]}" if item.summary else "")
+        f"{i+1}. [{item.get('source', '')}] {item.get('title', '')}"
+        + (f"\nResumen: {item['summary'][:200]}" if item.get("summary") else "")
         for i, item in enumerate(items)
     )
 
@@ -69,7 +73,7 @@ def enrich_news(items: list[NewsItem], cfg) -> list[NewsItem]:
                 c = contexts[i]
                 que_paso = c.get("que_paso", "")
                 implicacion = c.get("implicacion", "")
-                item.context = f"{que_paso} {implicacion}".strip()
+                item["context"] = f"{que_paso} {implicacion}".strip()
 
     except Exception as e:
         print(f"  ⚠️  Enricher error: {e} — noticias sin contexto")

@@ -8,6 +8,7 @@ Capa de persistencia SQLite (stdlib sqlite3, sin ORM).
 - Acceso serializado con un lock global: suficiente para una app personal
   con pocos hilos (Flask + scheduler).
 """
+import hashlib
 import json
 import os
 import sqlite3
@@ -111,6 +112,29 @@ CREATE TABLE IF NOT EXISTS watchlist (
     symbol TEXT PRIMARY KEY,
     added_at TEXT,
     note TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS feed_health (
+    source_name TEXT PRIMARY KEY,
+    url TEXT,
+    section TEXT,
+    status TEXT,
+    entries INTEGER,
+    last_ok TEXT,
+    last_checked TEXT
+);
+
+CREATE TABLE IF NOT EXISTS news_feedback (
+    url_hash TEXT PRIMARY KEY,
+    url TEXT,
+    title TEXT,
+    section TEXT,
+    source TEXT,
+    symbols TEXT,
+    liked INTEGER DEFAULT 0,
+    read INTEGER DEFAULT 0,
+    liked_at TEXT,
+    read_at TEXT
 );
 """
 
@@ -355,6 +379,139 @@ def remove_from_watchlist(symbol: str) -> bool:
     with db_conn() as conn:
         cur = conn.execute("DELETE FROM watchlist WHERE symbol = ?", (symbol,))
         return cur.rowcount > 0
+
+
+# ── Health check de fuentes de noticias ─────────────────────────────────────
+
+def upsert_feed_health(source_name: str, url: str, section: str,
+                       status: str, entries: int, checked_at: str):
+    """Upsert del estado de una fuente RSS. Si la fuente respondió (status ok)
+    se actualiza last_ok; si está caída, se conserva el last_ok anterior para
+    saber desde cuándo dejó de funcionar."""
+    last_ok = checked_at if status == "ok" else None
+    with db_conn() as conn:
+        conn.execute(
+            """INSERT INTO feed_health
+               (source_name, url, section, status, entries, last_ok, last_checked)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(source_name) DO UPDATE SET
+                 url = excluded.url,
+                 section = excluded.section,
+                 status = excluded.status,
+                 entries = excluded.entries,
+                 last_ok = COALESCE(excluded.last_ok, feed_health.last_ok),
+                 last_checked = excluded.last_checked""",
+            (source_name, url, section, status, entries, last_ok, checked_at),
+        )
+
+
+def prune_feed_health(current_names: list):
+    """Borra fuentes que ya no existen en RSS_SOURCES (renombradas o eliminadas)."""
+    if not current_names:
+        return
+    placeholders = ",".join("?" for _ in current_names)
+    with db_conn() as conn:
+        conn.execute(
+            f"DELETE FROM feed_health WHERE source_name NOT IN ({placeholders})",
+            list(current_names),
+        )
+
+
+def get_feed_health() -> list:
+    """Estado de todas las fuentes, agrupadas por sección y nombre."""
+    with db_conn() as conn:
+        rows = conn.execute(
+            """SELECT source_name, url, section, status, entries, last_ok, last_checked
+               FROM feed_health ORDER BY section, source_name"""
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ── Feedback de noticias (likes / leídas) ────────────────────────────────────
+
+def news_url_hash(url: str) -> str:
+    """Hash estable de la URL de una noticia (clave primaria del feedback)."""
+    return hashlib.sha1((url or "").encode("utf-8")).hexdigest()
+
+
+def set_news_feedback(item_data: dict, liked=None, read=None) -> dict:
+    """
+    Upsert parcial del feedback de una noticia: solo pisa los campos que vienen
+    (liked y/o read); el otro conserva su valor anterior. liked_at / read_at
+    guardan cuándo se activó cada flag (se limpian al desactivarlo) y alimentan
+    el decaimiento temporal del perfil de afinidad.
+    Retorna el estado resultante: {url_hash, liked, read}.
+    """
+    url = (item_data.get("url") or "").strip()
+    h = news_url_hash(url)
+    now = datetime.now().isoformat()
+    with db_conn() as conn:
+        conn.execute(
+            """INSERT INTO news_feedback (url_hash, url, title, section, source, symbols)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(url_hash) DO UPDATE SET
+                 title = excluded.title,
+                 section = excluded.section,
+                 source = excluded.source,
+                 symbols = excluded.symbols""",
+            (
+                h, url,
+                item_data.get("title") or "",
+                item_data.get("section") or "",
+                item_data.get("source") or "",
+                json.dumps(item_data.get("symbols") or []),
+            ),
+        )
+        if liked is not None:
+            conn.execute(
+                'UPDATE news_feedback SET liked = ?, liked_at = ? WHERE url_hash = ?',
+                (1 if liked else 0, now if liked else None, h),
+            )
+        if read is not None:
+            conn.execute(
+                'UPDATE news_feedback SET "read" = ?, read_at = ? WHERE url_hash = ?',
+                (1 if read else 0, now if read else None, h),
+            )
+        row = conn.execute(
+            'SELECT url_hash, liked, "read" FROM news_feedback WHERE url_hash = ?', (h,)
+        ).fetchone()
+    return {"url_hash": row["url_hash"], "liked": bool(row["liked"]), "read": bool(row["read"])}
+
+
+def get_news_feedback_map() -> dict:
+    """Mapa {url_hash: {liked, read}} para mergear en /api/news en O(1) por item."""
+    with db_conn() as conn:
+        rows = conn.execute(
+            'SELECT url_hash, liked, "read" FROM news_feedback WHERE liked = 1 OR "read" = 1'
+        ).fetchall()
+    return {
+        r["url_hash"]: {"liked": bool(r["liked"]), "read": bool(r["read"])}
+        for r in rows
+    }
+
+
+def get_feedback_rows(days: int = 90) -> list:
+    """Filas de feedback con actividad en los últimos N días (para el perfil
+    de afinidad y el tablero de stats). symbols viene ya parseado a lista."""
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    with db_conn() as conn:
+        rows = conn.execute(
+            '''SELECT url, title, section, source, symbols,
+                      liked, "read", liked_at, read_at
+               FROM news_feedback
+               WHERE (liked_at IS NOT NULL AND liked_at >= ?)
+                  OR (read_at IS NOT NULL AND read_at >= ?)''',
+            (cutoff, cutoff),
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["symbols"] = json.loads(d.get("symbols") or "[]")
+        except Exception:
+            d["symbols"] = []
+        out.append(d)
+    return out
 
 
 # ── Instrumentación de uso de endpoints ──────────────────────────────────────

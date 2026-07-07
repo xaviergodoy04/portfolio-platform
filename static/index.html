@@ -752,11 +752,21 @@
           <button class="btn btn-outline btn-sm" onclick="addCompareFromInput()">+ Agregar</button>
           <button class="btn btn-primary" onclick="runCompare()">⚖️ Comparar</button>
         </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:12px">
+          <span style="color:var(--text-faint);font-size:12px;margin-right:4px">Período:</span>
+          <button class="btn btn-outline btn-sm compare-period-chip" data-period="1mo" onclick="setComparePeriod('1mo')">1M</button>
+          <button class="btn btn-outline btn-sm compare-period-chip" data-period="3mo" onclick="setComparePeriod('3mo')">3M</button>
+          <button class="btn btn-outline btn-sm compare-period-chip" data-period="6mo" onclick="setComparePeriod('6mo')">6M</button>
+          <button class="btn btn-primary btn-sm compare-period-chip" data-period="1y" onclick="setComparePeriod('1y')">1A</button>
+          <button class="btn btn-outline btn-sm compare-period-chip" data-period="2y" onclick="setComparePeriod('2y')">2A</button>
+          <button class="btn btn-outline btn-sm compare-period-chip" data-period="5y" onclick="setComparePeriod('5y')">5A</button>
+          <button class="btn btn-outline btn-sm compare-period-chip" data-period="max" onclick="setComparePeriod('max')">Max</button>
+        </div>
       </div>
 
       <div id="compare-loading" style="display:none" class="loading-overlay"><div class="spinner"></div> Cargando datos...</div>
       <div id="compare-results" style="display:none;margin-bottom:20px">
-        <div class="grid-2" style="margin-bottom:0">
+        <div class="grid-2">
           <div class="card">
             <div class="card-title">Retorno normalizado (base 100)</div>
             <canvas id="chart-compare"></canvas>
@@ -764,6 +774,17 @@
           <div class="card">
             <div class="card-title">Métricas clave</div>
             <div id="compare-metrics-table"></div>
+          </div>
+        </div>
+        <div class="grid-2" style="margin-bottom:0">
+          <div class="card">
+            <div class="card-title">Drawdown desde máximos</div>
+            <canvas id="chart-compare-drawdown"></canvas>
+          </div>
+          <div class="card" id="compare-correlation-card">
+            <div class="card-title">Correlación de retornos diarios</div>
+            <div id="compare-correlation" style="overflow-x:auto"></div>
+            <div style="color:var(--text-faint);font-size:11px;margin-top:8px">Correlación alta entre activos = diversificación falsa.</div>
           </div>
         </div>
       </div>
@@ -1190,6 +1211,7 @@ let portfolioData = null;
 let watchlistData = [];
 let watchlistSet = new Set();
 let compareChart = null;
+let compareDrawdownChart = null;
 let allocationChart = null;
 let evolutionChart = null;
 let detailChart = null;
@@ -1873,80 +1895,162 @@ function renderCompareChips() {
     `<span class="chip">${s}<button onclick="removeFromCompare('${s}')" title="Quitar">✕</button></span>`).join('');
 }
 
-async function runCompare() {
+let comparePeriod = '1y';
+
+function setComparePeriod(period) {
+  comparePeriod = period;
+  document.querySelectorAll('.compare-period-chip').forEach(btn => {
+    btn.className = btn.dataset.period === period
+      ? 'btn btn-primary btn-sm compare-period-chip'
+      : 'btn btn-outline btn-sm compare-period-chip';
+  });
+  // Si ya hay una comparación en pantalla, re-fetch y re-render con el nuevo período
+  if (document.getElementById('compare-results').style.display !== 'none' && compareSymbols.length >= 2) {
+    runCompare(false);
+  }
+}
+
+async function runCompare(scroll = true) {
   if (compareSymbols.length < 2) { showToast('⚠️ Agregá al menos 2 símbolos a la bandeja'); return; }
 
   document.getElementById('compare-results').style.display = 'none';
   document.getElementById('compare-loading').style.display = 'flex';
 
   try {
-    const resp = await fetch(`/api/compare?symbols=${encodeURIComponent(compareSymbols.join(','))}`);
+    const resp = await fetch(`/api/compare?symbols=${encodeURIComponent(compareSymbols.join(','))}&period=${encodeURIComponent(comparePeriod)}`);
     const data = await resp.json();
     document.getElementById('compare-loading').style.display = 'none';
-    renderComparison(data);
+    if (!resp.ok) { showToast(`❌ ${data.error || 'Error al comparar'}`); return; }
+    renderComparison(data, scroll);
   } catch(e) {
     document.getElementById('compare-loading').style.display = 'none';
     showToast('❌ Error al comparar');
   }
 }
 
-function renderComparison(data) {
-  const ctx = document.getElementById('chart-compare').getContext('2d');
-  if (compareChart) compareChart.destroy();
+// Opciones compartidas de los charts de comparación (estilo de la app)
+function compareChartOptions(yTickCallback) {
+  return {
+    responsive: true,
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { labels: { color: 'rgba(255,255,255,0.6)' } } },
+    scales: {
+      x: { ticks: { color: 'rgba(255,255,255,0.3)', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+      y: { ticks: { color: 'rgba(255,255,255,0.3)', callback: yTickCallback }, grid: { color: 'rgba(255,255,255,0.05)' } }
+    }
+  };
+}
 
+function renderComparison(data, scroll = true) {
   const colors = ['#a3e635','#22d3ee','#fb923c','#e879f9','#4ade80','#fbbf24'];
-  const datasets = [];
   const history = data.history || {};
+  const syms = Object.keys(history); // mismo orden (y color) en ambos charts
+  const colorOf = sym => colors[syms.indexOf(sym) % colors.length];
 
-  Object.entries(history).forEach(([sym, h], i) => {
-    datasets.push({
-      label: sym,
-      data: h.normalized,
-      borderColor: colors[i % colors.length],
-      backgroundColor: 'transparent',
-      borderWidth: 2,
-      pointRadius: 0,
-    });
-  });
+  // Símbolos sin datos: se avisa pero la comparación sigue
+  const errored = Object.keys(data.errors || {});
+  if (errored.length) showToast(`⚠️ Sin datos para: ${errored.join(', ')}`);
 
-  const firstKey = Object.keys(history)[0];
+  const firstKey = syms[0];
   const labels = firstKey ? history[firstKey].dates : [];
 
+  // Chart normalizado (base 100)
+  const ctx = document.getElementById('chart-compare').getContext('2d');
+  if (compareChart) compareChart.destroy();
   compareChart = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { labels: { color: 'rgba(255,255,255,0.6)' } } },
-      scales: {
-        x: { ticks: { color: 'rgba(255,255,255,0.3)', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.05)' } },
-        y: { ticks: { color: 'rgba(255,255,255,0.3)', callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,0.05)' } }
-      }
-    }
+    data: {
+      labels,
+      datasets: syms.map(sym => ({
+        label: sym,
+        data: history[sym].normalized,
+        borderColor: colorOf(sym),
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointRadius: 0,
+      }))
+    },
+    options: compareChartOptions(v => v + '%')
   });
 
-  // Métricas table
+  // Chart de drawdown (% de caída desde el máximo acumulado, siempre ≤ 0)
+  const ddCtx = document.getElementById('chart-compare-drawdown').getContext('2d');
+  if (compareDrawdownChart) compareDrawdownChart.destroy();
+  const ddOptions = compareChartOptions(v => v + '%');
+  ddOptions.scales.y.suggestedMax = 0;
+  compareDrawdownChart = new Chart(ddCtx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: syms.map(sym => ({
+        label: sym,
+        data: history[sym].drawdown,
+        borderColor: colorOf(sym),
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointRadius: 0,
+      }))
+    },
+    options: ddOptions
+  });
+
+  // Métricas table (todas calculadas sobre el período pedido)
   const metrics = data.metrics || {};
   const rows = Object.entries(metrics).map(([sym, m]) => `
     <tr>
       <td><strong>${sym}</strong></td>
-      <td>${fmtPct(m.return_1y)}</td>
-      <td>${fmt(m.volatility_1y)}%</td>
-      <td>${fmt(m.sharpe_approx, 2)}</td>
-      <td>${m.pe_ratio ? fmt(m.pe_ratio, 1) : '—'}</td>
-      <td>${m.sector || '—'}</td>
+      <td>${fmtPct(m.return_pct)}</td>
+      <td>${fmt(m.volatility_pct)}%</td>
+      <td><span class="${m.sharpe_approx >= 0 ? 'positive' : 'negative'}">${fmt(m.sharpe_approx)}</span></td>
+      <td><span style="color:rgba(248,113,113,0.8)">${fmt(m.max_drawdown_pct)}%</span></td>
+      <td>${m.beta_vs_spy != null ? fmt(m.beta_vs_spy) : '—'}</td>
     </tr>`).join('');
 
   document.getElementById('compare-metrics-table').innerHTML = `
     <table>
-      <thead><tr><th>Símbolo</th><th>Retorno</th><th>Volatilidad</th><th>Sharpe</th><th>P/E</th><th>Sector</th></tr></thead>
+      <thead><tr><th>Símbolo</th><th>Retorno</th><th>Volatilidad</th><th>Sharpe</th><th>Max DD</th><th>Beta vs SPY</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 
+  renderCorrelationMatrix(data.correlation || {});
+
   const results = document.getElementById('compare-results');
   results.style.display = 'block';
-  results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (scroll) results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function renderCorrelationMatrix(correlation) {
+  const card = document.getElementById('compare-correlation-card');
+  const syms = Object.keys(correlation);
+  if (syms.length < 2) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  // Color por intensidad: |r| < 0.4 verde (buena diversificación),
+  // 0.4–0.7 amarillo, > 0.7 rojo (alta correlación). Diagonal en gris.
+  const cellStyle = (a, b, r) => {
+    if (a === b) return 'background:rgba(255,255,255,0.06);color:var(--text-muted)';
+    if (r == null) return 'color:var(--text-faint)';
+    const abs = Math.abs(r);
+    if (abs < 0.4) return 'background:rgba(74,222,128,0.12);color:var(--green)';
+    if (abs <= 0.7) return 'background:rgba(251,191,36,0.12);color:var(--yellow)';
+    return 'background:rgba(248,113,113,0.15);color:var(--red)';
+  };
+
+  const header = syms.map(s => `<th style="text-align:center">${s}</th>`).join('');
+  const body = syms.map(a => `
+    <tr>
+      <td><strong>${a}</strong></td>
+      ${syms.map(b => {
+        const r = a === b ? 1 : (correlation[a] || {})[b];
+        return `<td style="text-align:center;font-family:var(--mono);${cellStyle(a, b, r)}">${r == null ? '—' : fmt(r)}</td>`;
+      }).join('')}
+    </tr>`).join('');
+
+  document.getElementById('compare-correlation').innerHTML = `
+    <table>
+      <thead><tr><th></th>${header}</tr></thead>
+      <tbody>${body}</tbody>
+    </table>`;
 }
 
 // ── Alertas: tabs de sección (mis / smart / track) ────────────────────────────

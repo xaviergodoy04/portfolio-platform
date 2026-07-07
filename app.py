@@ -13,7 +13,13 @@ import threading
 
 import config
 from modules.ibkr import fetch_flex_report, parse_csv_upload
-from modules.market_data import get_quote, get_history, compare_assets, enrich_positions
+from modules.market_data import (
+    VALID_COMPARE_PERIODS,
+    get_quote,
+    get_history,
+    compare_assets,
+    enrich_positions,
+)
 from modules.ai_analysis import analyze_asset, chat_analysis
 from modules.ai_provider import AIProvider
 from modules.alerts import get_alerts, create_alert, create_pct_alert, delete_alert, check_alerts
@@ -218,10 +224,15 @@ def history(symbol):
 @app.route("/api/compare")
 def compare():
     symbols_str = request.args.get("symbols", "")
+    period = request.args.get("period", "1y")
     symbols = [s.strip().upper() for s in symbols_str.split(",") if s.strip()]
     if not symbols:
         return jsonify({"error": "Indicá al menos un símbolo"}), 400
-    return jsonify(compare_assets(symbols))
+    if period not in VALID_COMPARE_PERIODS:
+        return jsonify({
+            "error": f"Período inválido: '{period}'. Válidos: {', '.join(VALID_COMPARE_PERIODS)}"
+        }), 400
+    return jsonify(compare_assets(symbols, period))
 
 
 # ── AI Analysis ──────────────────────────────────────────────────────────────

@@ -106,39 +106,104 @@ def get_history(symbol: str, period: str = "1y") -> dict:
 
 # ── Lógica de negocio agnóstica del provider ─────────────────────────────────
 
-def compare_assets(symbols: list[str]) -> dict:
-    """Compara múltiples activos: precios normalizados + métricas clave."""
-    comparison_data = {"symbols": symbols, "quotes": {}, "history": {}, "metrics": {}}
+# Períodos aceptados por compare_assets (el endpoint valida contra esta tupla)
+VALID_COMPARE_PERIODS = ("1mo", "3mo", "6mo", "1y", "2y", "5y", "max")
+
+
+def compare_assets(symbols: list[str], period: str = "1y") -> dict:
+    """Compara múltiples activos sobre el período pedido: precios normalizados
+    base 100, serie de drawdown, métricas (retorno, volatilidad anualizada,
+    sharpe aproximado, max drawdown, beta vs SPY) y matriz de correlación de
+    retornos diarios. Los símbolos sin datos se reportan en "errors" sin
+    romper el resto de la comparación."""
+    if period not in VALID_COMPARE_PERIODS:
+        raise ValueError(
+            f"Período inválido: '{period}'. Válidos: {', '.join(VALID_COMPARE_PERIODS)}"
+        )
+
+    comparison_data = {
+        "symbols": symbols,
+        "period": period,
+        "quotes": {},
+        "history": {},
+        "metrics": {},
+        "correlation": {},
+        "errors": {},
+    }
+
+    # Historia de SPY una sola vez por request (benchmark para beta)
+    spy_hist = get_history("SPY", period)
+    spy_returns = None
+    if "error" not in spy_hist and spy_hist.get("close"):
+        spy_closes = pd.Series(spy_hist["close"], index=spy_hist["dates"], dtype=float)
+        spy_returns = spy_closes.pct_change().dropna()
+
+    daily_returns = {}  # symbol -> Series de retornos diarios (index = fecha)
 
     for symbol in symbols:
         quote = get_quote(symbol)
         if "error" not in quote:
             comparison_data["quotes"][symbol] = quote
 
-        hist = get_history(symbol, "1y")
-        if "error" not in hist and hist.get("close"):
-            # Normalizar a base 100
-            base = hist["close"][0]
-            normalized = [round((p / base) * 100, 2) for p in hist["close"]]
-            comparison_data["history"][symbol] = {
-                "dates": hist["dates"],
-                "normalized": normalized,
-                "close": hist["close"]
-            }
+        hist = get_history(symbol, period)
+        if "error" in hist or not hist.get("close"):
+            comparison_data["errors"][symbol] = hist.get(
+                "error", "Sin datos de historial para el período"
+            )
+            continue
 
-            # Calcular retorno del período
-            ret = ((hist["close"][-1] - hist["close"][0]) / hist["close"][0]) * 100
-            vol = pd.Series(hist["close"]).pct_change().std() * (252 ** 0.5) * 100  # volatilidad anualizada
+        closes = pd.Series(hist["close"], index=hist["dates"], dtype=float)
 
-            comparison_data["metrics"][symbol] = {
-                "return_1y": round(ret, 2),
-                "volatility_1y": round(vol, 2),
-                "sharpe_approx": round(ret / vol, 2) if vol > 0 else 0,
-                "current_price": hist["close"][-1],
-                "pe_ratio": quote.get("pe_ratio"),
-                "market_cap": quote.get("market_cap"),
-                "sector": quote.get("sector"),
+        # Normalizar a base 100
+        base = closes.iloc[0]
+        normalized = [round((p / base) * 100, 2) for p in hist["close"]]
+
+        # Drawdown: % de caída desde el máximo acumulado hasta cada fecha (≤ 0)
+        drawdown_series = ((closes / closes.cummax()) - 1) * 100
+        comparison_data["history"][symbol] = {
+            "dates": hist["dates"],
+            "normalized": normalized,
+            "close": hist["close"],
+            "drawdown": [round(d, 2) for d in drawdown_series.tolist()],
+        }
+
+        # Métricas sobre el período pedido
+        ret = ((closes.iloc[-1] - base) / base) * 100
+        returns = closes.pct_change().dropna()
+        vol = returns.std() * (252 ** 0.5) * 100  # volatilidad anualizada
+
+        # Beta vs SPY: cov(retornos, retornos SPY) / var(SPY), fechas alineadas
+        beta = None
+        if spy_returns is not None and len(returns) >= 2:
+            aligned = pd.concat([returns, spy_returns], axis=1, join="inner").dropna()
+            if len(aligned) >= 2:
+                spy_var = aligned.iloc[:, 1].var()
+                if spy_var and spy_var > 0:
+                    beta = round(aligned.iloc[:, 0].cov(aligned.iloc[:, 1]) / spy_var, 2)
+
+        comparison_data["metrics"][symbol] = {
+            "return_pct": round(ret, 2),
+            "volatility_pct": round(vol, 2),
+            "sharpe_approx": round(ret / vol, 2) if vol > 0 else 0,
+            "max_drawdown_pct": round(drawdown_series.min(), 2),
+            "beta_vs_spy": beta,
+            "current_price": hist["close"][-1],
+            "pe_ratio": quote.get("pe_ratio"),
+            "market_cap": quote.get("market_cap"),
+            "sector": quote.get("sector"),
+        }
+        daily_returns[symbol] = returns
+
+    # Matriz de correlación de Pearson (retornos diarios, fechas comunes)
+    if daily_returns:
+        corr = pd.DataFrame(daily_returns).corr()
+        comparison_data["correlation"] = {
+            a: {
+                b: (round(float(corr.loc[a, b]), 2) if pd.notna(corr.loc[a, b]) else None)
+                for b in corr.columns
             }
+            for a in corr.index
+        }
 
     return comparison_data
 

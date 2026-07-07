@@ -7,8 +7,9 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_from_directory
 from flask_cors import CORS
+import threading
 
 import config
 from modules.ibkr import fetch_flex_report, parse_csv_upload
@@ -50,6 +51,61 @@ def _persist_portfolio(data: dict):
         db.upsert_snapshot(data)
     except Exception as e:
         print(f"⚠️  Error persistiendo portfolio en la DB: {e}")
+
+
+# ── Instrumentación de uso ───────────────────────────────────────────────────
+# Registra cada request a /api/* en la tabla `events` (ts, endpoint, method,
+# status, duration_ms). Se excluye el frontend ("/" y estáticos). Los endpoints
+# de polling de alto volumen se registran con sampling 1/10 (determinístico,
+# contador por endpoint) para no llenar la tabla de ruido: sus counts en
+# /api/stats/usage representan ~10% del tráfico real.
+
+_SAMPLED_ENDPOINTS = {"/api/alerts/check", "/api/smart-alerts/unseen"}
+_SAMPLE_RATE = 10
+_sample_lock = threading.Lock()
+_sample_counters = {}
+
+
+@app.before_request
+def _usage_start_timer():
+    g._usage_start = time.perf_counter()
+
+
+@app.after_request
+def _usage_log_request(response):
+    """Registra el request en la DB. Best effort: jamás rompe la respuesta."""
+    try:
+        path = request.path
+        if not path.startswith("/api/"):
+            return response
+
+        if path in _SAMPLED_ENDPOINTS:
+            with _sample_lock:
+                _sample_counters[path] = _sample_counters.get(path, 0) + 1
+                n = _sample_counters[path]
+            if n % _SAMPLE_RATE != 1:  # registra 1 de cada 10 (el 1º, 11º, ...)
+                return response
+
+        start = getattr(g, "_usage_start", None)
+        duration_ms = (time.perf_counter() - start) * 1000 if start else 0.0
+        # Usar la regla de la ruta (ej: /api/quote/<symbol>) para agregar
+        # por endpoint y no por cada símbolo pedido
+        endpoint = request.url_rule.rule if request.url_rule else path
+        db.log_event(endpoint, request.method, response.status_code, duration_ms)
+    except Exception:
+        pass  # la instrumentación nunca debe romper un request
+    return response
+
+
+@app.route("/api/stats/usage")
+def usage_stats():
+    """Estadísticas de uso de los endpoints: count, latencia promedio,
+    errores 5xx por endpoint y serie diaria de requests."""
+    try:
+        days = int(request.args.get("days", 30))
+    except ValueError:
+        days = 30
+    return jsonify(db.get_usage_stats(days))
 
 
 # ── Servir el frontend ───────────────────────────────────────────────────────

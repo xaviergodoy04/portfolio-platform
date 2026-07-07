@@ -248,5 +248,50 @@ def has_snapshot_today() -> bool:
     return row is not None
 
 
+# ── Instrumentación de uso de endpoints ──────────────────────────────────────
+
+def log_event(endpoint: str, method: str, status: int, duration_ms: float):
+    """Registra un request en la tabla events. Best effort: si la DB está
+    lockeada o falla cualquier cosa, se descarta el evento sin romper nada."""
+    try:
+        with db_conn() as conn:
+            conn.execute(
+                """INSERT INTO events (ts, endpoint, method, status, duration_ms)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (datetime.now().isoformat(), endpoint, method, status,
+                 round(float(duration_ms), 2)),
+            )
+    except Exception:
+        pass
+
+
+def get_usage_stats(days: int = 30) -> dict:
+    """Uso agregado por endpoint (count, latencia promedio, errores 5xx)
+    más la serie diaria de requests totales."""
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    with db_conn() as conn:
+        by_endpoint = conn.execute(
+            """SELECT endpoint,
+                      COUNT(*) AS count,
+                      ROUND(AVG(duration_ms), 2) AS avg_duration_ms,
+                      SUM(CASE WHEN status >= 500 THEN 1 ELSE 0 END) AS errors
+               FROM events WHERE ts >= ?
+               GROUP BY endpoint ORDER BY count DESC""",
+            (cutoff,),
+        ).fetchall()
+        by_day = conn.execute(
+            """SELECT substr(ts, 1, 10) AS date, COUNT(*) AS count
+               FROM events WHERE ts >= ?
+               GROUP BY date ORDER BY date ASC""",
+            (cutoff,),
+        ).fetchall()
+    return {
+        "days": days,
+        "endpoints": [dict(r) for r in by_endpoint],
+        "by_day": [dict(r) for r in by_day],
+        "total_requests": sum(r["count"] for r in by_day),
+    }
+
+
 # Inicializar al importar (idempotente)
 init_db()

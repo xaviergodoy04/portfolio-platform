@@ -21,6 +21,10 @@ GROQ_MODEL_FAST = os.getenv("GROQ_MODEL_FAST", "llama-3.1-8b-instant")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 
+# --- Datos de mercado ---
+# Proveedor de datos de mercado ("yfinance" es el único implementado hoy)
+MARKET_PROVIDER = os.getenv("MARKET_PROVIDER", "yfinance")
+
 # --- General ---
 APP_PORT = int(os.getenv("APP_PORT", "5000"))
 DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"

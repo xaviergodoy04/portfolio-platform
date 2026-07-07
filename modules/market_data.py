@@ -1,25 +1,33 @@
 """
-Módulo de datos de mercado usando yfinance (gratuito).
+Fachada de datos de mercado.
 
-Incluye un cache en memoria thread-safe (dict + lock):
-- info de tickers (base de get_quote): TTL 120 s
+La obtención de datos vive en modules/market_provider.py (provider activo
+según MARKET_PROVIDER en config, default yfinance). Esta fachada mantiene la
+API pública histórica (get_quote / get_history / get_ticker_info /
+compare_assets / enrich_positions) para que ningún consumidor cambie sus
+imports, y agrega un cache TTL en memoria agnóstico del provider:
+
+- quotes e info de tickers: TTL 120 s
 - historiales de precios: TTL 600 s, key símbolo+período
-Los resultados fallidos (excepción, respuesta vacía o sin precio real) NO se
-cachean, así el próximo request reintenta contra yfinance.
+
+Los resultados fallidos (None o dicts con "error") NO se cachean, así el
+próximo request reintenta contra el provider.
 """
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-import yfinance as yf
 import pandas as pd
 
-QUOTE_TTL = 120       # segundos
+from modules.market_provider import get_provider
+
+QUOTE_TTL = 120       # segundos (quotes + info de tickers)
 HISTORY_TTL = 600     # segundos
 MAX_WORKERS = 8       # hilos para enriquecer posiciones en paralelo
 
 _cache_lock = threading.Lock()
-_info_cache: dict = {}     # symbol -> (timestamp, info crudo de yfinance)
+_info_cache: dict = {}     # symbol -> (timestamp, info cruda del provider)
+_quote_cache: dict = {}    # symbol -> (timestamp, dict de get_quote)
 _history_cache: dict = {}  # (symbol, period) -> (timestamp, dict de get_history)
 
 
@@ -27,12 +35,13 @@ def clear_cache():
     """Vacía todos los caches en memoria (útil para tests)."""
     with _cache_lock:
         _info_cache.clear()
+        _quote_cache.clear()
         _history_cache.clear()
 
 
 def _cache_get(cache: dict, key, ttl: float):
     """Lee del cache si la entrada existe y no expiró. El lock solo protege
-    el acceso al dict: el fetch a yfinance ocurre fuera del lock para no
+    el acceso al dict: el fetch al provider ocurre fuera del lock para no
     serializar las llamadas en paralelo."""
     with _cache_lock:
         item = cache.get(key)
@@ -46,25 +55,18 @@ def _cache_set(cache: dict, key, value):
         cache[key] = (time.time(), value)
 
 
+# ── API pública (misma firma y shapes de siempre) ────────────────────────────
+
 def get_ticker_info(symbol: str):
-    """
-    Info cruda de yfinance para un símbolo, cacheada QUOTE_TTL segundos.
-    Retorna None si yfinance falla, devuelve vacío o no trae un precio real
-    (0/None): esos casos NO se cachean para que el próximo intento reintente.
-    """
+    """Info cruda del provider para un símbolo, cacheada QUOTE_TTL segundos.
+    Retorna None si el provider no trae datos válidos (no se cachea)."""
     symbol = symbol.upper()
     cached = _cache_get(_info_cache, symbol, QUOTE_TTL)
     if cached is not None:
         return cached
 
-    try:
-        info = yf.Ticker(symbol).info
-    except Exception:
-        return None
-
-    price = (info or {}).get("currentPrice") or (info or {}).get("regularMarketPrice")
-    if not info or not price:
-        # Vacío o sin precio: no es un dato de mercado válido → no cachear
+    info = get_provider().get_ticker_info(symbol)
+    if info is None:
         return None
 
     _cache_set(_info_cache, symbol, info)
@@ -76,68 +78,33 @@ def get_quote(symbol: str) -> dict:
     Si no hay datos válidos retorna {"error": ..., "symbol": ...} — el resto
     del código ya distingue por la presencia de la key "error"."""
     symbol = symbol.upper()
-    info = get_ticker_info(symbol)
-    if info is None:
-        return {
-            "error": f"Error obteniendo datos de {symbol}: sin datos o sin precio válido en yfinance",
-            "symbol": symbol,
-        }
+    cached = _cache_get(_quote_cache, symbol, QUOTE_TTL)
+    if cached is not None:
+        return cached
 
-    return {
-        "symbol": symbol,
-        "name": info.get("longName", info.get("shortName", symbol)),
-        "price": info.get("currentPrice", info.get("regularMarketPrice", 0)),
-        "change_pct": info.get("regularMarketChangePercent", 0),
-        "volume": info.get("regularMarketVolume", 0),
-        "market_cap": info.get("marketCap", 0),
-        "pe_ratio": info.get("trailingPE", None),
-        "forward_pe": info.get("forwardPE", None),
-        "eps": info.get("trailingEps", None),
-        "dividend_yield": info.get("dividendYield", None),
-        "52w_high": info.get("fiftyTwoWeekHigh", None),
-        "52w_low": info.get("fiftyTwoWeekLow", None),
-        "avg_volume": info.get("averageVolume", None),
-        "sector": info.get("sector", None),
-        "industry": info.get("industry", None),
-        "currency": info.get("currency", "USD"),
-        "exchange": info.get("exchange", None),
-    }
+    quote = get_provider().get_quote(symbol)
+    if "error" not in quote:
+        _cache_set(_quote_cache, symbol, quote)
+    return quote
 
 
 def get_history(symbol: str, period: str = "1y") -> dict:
-    """
-    Historial de precios (cacheado 600 s por símbolo+período).
+    """Historial de precios (cacheado 600 s por símbolo+período).
     Periods: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
-    Los errores no se cachean.
-    """
+    Los errores no se cachean."""
     symbol = symbol.upper()
     key = (symbol, period)
     cached = _cache_get(_history_cache, key, HISTORY_TTL)
     if cached is not None:
         return cached
 
-    try:
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period=period)
-
-        if hist.empty:
-            return {"error": f"No hay datos históricos para {symbol}"}
-
-        result = {
-            "symbol": symbol,
-            "period": period,
-            "dates": hist.index.strftime("%Y-%m-%d").tolist(),
-            "close": hist["Close"].round(2).tolist(),
-            "open": hist["Open"].round(2).tolist(),
-            "high": hist["High"].round(2).tolist(),
-            "low": hist["Low"].round(2).tolist(),
-            "volume": hist["Volume"].tolist(),
-        }
+    result = get_provider().get_history(symbol, period)
+    if "error" not in result:
         _cache_set(_history_cache, key, result)
-        return result
-    except Exception as e:
-        return {"error": f"Error obteniendo historial de {symbol}: {str(e)}"}
+    return result
 
+
+# ── Lógica de negocio agnóstica del provider ─────────────────────────────────
 
 def compare_assets(symbols: list[str]) -> dict:
     """Compara múltiples activos: precios normalizados + métricas clave."""
@@ -209,7 +176,7 @@ def _enrich_one(pos: dict) -> dict:
 
 def enrich_positions(positions: list[dict]) -> list[dict]:
     """Agrega datos de mercado actuales a las posiciones del portfolio.
-    Las llamadas a yfinance se hacen en paralelo (hasta MAX_WORKERS hilos);
+    Las llamadas al provider se hacen en paralelo (hasta MAX_WORKERS hilos);
     executor.map preserva el orden original de las posiciones."""
     if not positions:
         return []

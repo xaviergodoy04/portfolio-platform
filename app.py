@@ -7,8 +7,9 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_from_directory
 from flask_cors import CORS
+import threading
 
 import config
 from modules.ibkr import fetch_flex_report, parse_csv_upload
@@ -22,8 +23,11 @@ from modules.smart_alerts import (
     get_history as smart_history, get_config as smart_get_config,
     update_config as smart_update_config
 )
+from modules.scheduler import init_scheduler, pop_pending_triggered
+from modules.track_record import get_track_record
 import asyncio
 import time
+from modules import db
 from modules.news.collector import collect_all as news_collect
 from modules.news.enricher import enrich_news
 from modules.news import cache as news_cache
@@ -33,6 +37,75 @@ CORS(app)
 
 # Cache en memoria para el portfolio (se limpia al reiniciar)
 _portfolio_cache = {}
+
+# Hidratar el cache desde la DB: un reinicio no obliga a esperar a IBKR
+_stored_portfolio = db.load_portfolio_cache()
+if _stored_portfolio:
+    _portfolio_cache["data"] = _stored_portfolio
+
+
+def _persist_portfolio(data: dict):
+    """Guarda el portfolio en la DB y hace upsert del snapshot del día."""
+    try:
+        db.save_portfolio_cache(data)
+        db.upsert_snapshot(data)
+    except Exception as e:
+        print(f"⚠️  Error persistiendo portfolio en la DB: {e}")
+
+
+# ── Instrumentación de uso ───────────────────────────────────────────────────
+# Registra cada request a /api/* en la tabla `events` (ts, endpoint, method,
+# status, duration_ms). Se excluye el frontend ("/" y estáticos). Los endpoints
+# de polling de alto volumen se registran con sampling 1/10 (determinístico,
+# contador por endpoint) para no llenar la tabla de ruido: sus counts en
+# /api/stats/usage representan ~10% del tráfico real.
+
+_SAMPLED_ENDPOINTS = {"/api/alerts/check", "/api/smart-alerts/unseen"}
+_SAMPLE_RATE = 10
+_sample_lock = threading.Lock()
+_sample_counters = {}
+
+
+@app.before_request
+def _usage_start_timer():
+    g._usage_start = time.perf_counter()
+
+
+@app.after_request
+def _usage_log_request(response):
+    """Registra el request en la DB. Best effort: jamás rompe la respuesta."""
+    try:
+        path = request.path
+        if not path.startswith("/api/"):
+            return response
+
+        if path in _SAMPLED_ENDPOINTS:
+            with _sample_lock:
+                _sample_counters[path] = _sample_counters.get(path, 0) + 1
+                n = _sample_counters[path]
+            if n % _SAMPLE_RATE != 1:  # registra 1 de cada 10 (el 1º, 11º, ...)
+                return response
+
+        start = getattr(g, "_usage_start", None)
+        duration_ms = (time.perf_counter() - start) * 1000 if start else 0.0
+        # Usar la regla de la ruta (ej: /api/quote/<symbol>) para agregar
+        # por endpoint y no por cada símbolo pedido
+        endpoint = request.url_rule.rule if request.url_rule else path
+        db.log_event(endpoint, request.method, response.status_code, duration_ms)
+    except Exception:
+        pass  # la instrumentación nunca debe romper un request
+    return response
+
+
+@app.route("/api/stats/usage")
+def usage_stats():
+    """Estadísticas de uso de los endpoints: count, latencia promedio,
+    errores 5xx por endpoint y serie diaria de requests."""
+    try:
+        days = int(request.args.get("days", 30))
+    except ValueError:
+        days = 30
+    return jsonify(db.get_usage_stats(days))
 
 
 # ── Servir el frontend ───────────────────────────────────────────────────────
@@ -65,6 +138,7 @@ def get_portfolio():
         data["summary"]["total_unrealized_pnl"] = round(total_pnl, 2)
         data["summary"]["total_pnl_pct"] = round((total_pnl / cost_basis * 100) if cost_basis != 0 else 0, 2)
         _portfolio_cache["data"] = data
+        _persist_portfolio(data)
 
     return jsonify(data)
 
@@ -82,6 +156,7 @@ def upload_csv():
     if "error" not in data and data.get("positions"):
         data["positions"] = enrich_positions(data["positions"])
         _portfolio_cache["data"] = data
+        _persist_portfolio(data)
 
     return jsonify(data)
 
@@ -111,7 +186,19 @@ def set_manual_portfolio():
         "source": "manual"
     }
     _portfolio_cache["data"] = data
+    _persist_portfolio(data)
     return jsonify(data)
+
+
+@app.route("/api/portfolio/history", methods=["GET"])
+def portfolio_history():
+    """Historial de snapshots diarios del portfolio (para gráficos de evolución)."""
+    try:
+        days = int(request.args.get("days", 90))
+    except ValueError:
+        days = 90
+    snapshots = db.get_snapshots(days)
+    return jsonify({"snapshots": snapshots, "count": len(snapshots)})
 
 
 # ── Market Data ──────────────────────────────────────────────────────────────
@@ -152,8 +239,22 @@ def chat():
     if not question:
         return jsonify({"error": "Pregunta vacía"}), 400
 
+    # Historial de conversación (opcional, retro-compatible): se limita a los
+    # últimos 20 mensajes para acotar el tamaño del prompt.
+    history = body.get("history")
+    if isinstance(history, list):
+        history = history[-20:]
+    else:
+        history = None
+
+    # Símbolo que el usuario está mirando en la UI (opcional)
+    context_symbol = body.get("context_symbol") or None
+    if context_symbol:
+        context_symbol = str(context_symbol).strip().upper()[:12]
+
     portfolio = _portfolio_cache.get("data")
-    answer = chat_analysis(question, config, portfolio)
+    answer = chat_analysis(question, config, portfolio,
+                           history=history, context_symbol=context_symbol)
     return jsonify({"answer": answer})
 
 
@@ -214,13 +315,18 @@ def remove_alert(alert_id):
 
 @app.route("/api/alerts/check", methods=["GET"])
 def check():
-    """Verifica alertas contra precios actuales de las posiciones en caché."""
+    """Verifica alertas contra precios actuales de las posiciones en caché.
+    Además entrega lo que el scheduler haya disparado desde el último poll."""
+    # Alertas disparadas por el scheduler server-side, pendientes de notificar
+    pending = pop_pending_triggered()
+
     alerts = get_alerts()
-    if not alerts:
-        return jsonify([])
+    active = [a for a in alerts if not a["triggered"]]
+    if not active:
+        return jsonify(pending)
 
     # Obtener precios actuales de los símbolos con alertas activas
-    symbols = list({a["symbol"] for a in alerts if not a["triggered"]})
+    symbols = list({a["symbol"] for a in active})
     prices = {}
     for sym in symbols:
         q = get_quote(sym)
@@ -228,7 +334,7 @@ def check():
             prices[sym] = q.get("price", 0)
 
     triggered = check_alerts(prices)
-    return jsonify(triggered)
+    return jsonify(pending + triggered)
 
 
 # ── Radar de Oportunidades ───────────────────────────────────────────────────
@@ -263,6 +369,12 @@ def smart_mark_seen():
 @app.route("/api/smart-alerts/history")
 def smart_hist():
     return jsonify(smart_history())
+
+@app.route("/api/smart-alerts/track-record")
+def smart_track_record():
+    """Performance de cada smart alert desde su detección vs SPY (cacheado 15 min)."""
+    force = request.args.get("refresh", "false") == "true"
+    return jsonify(get_track_record(force_refresh=force))
 
 @app.route("/api/smart-alerts/config", methods=["GET"])
 def smart_cfg_get():
@@ -371,4 +483,11 @@ if __name__ == "__main__":
     print(f"   AI Provider: {config.AI_PROVIDER}")
     print(f"   Groq (gratis): {'✅ configurado' if groq_ok else '⚠️  no configurado'}")
     print(f"   Anthropic (pago): {'✅ configurado' if anthropic_ok else '⚠️  no configurado'}")
+
+    # Iniciar el scheduler evitando el doble arranque del reloader de Flask:
+    # - con debug/reloader activo, solo el proceso hijo tiene WERKZEUG_RUN_MAIN=true
+    # - sin reloader (DEBUG_MODE=false), se inicia directo
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not config.DEBUG_MODE:
+        init_scheduler()
+
     app.run(debug=config.DEBUG_MODE, port=config.APP_PORT)

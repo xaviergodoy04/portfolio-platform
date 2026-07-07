@@ -148,6 +148,18 @@
       display: flex;
       align-items: center;
       gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-strong);
+      margin: 26px 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
     }
 
     /* Table */
@@ -229,11 +241,66 @@
     .rec-VENDER { background: rgba(248, 113, 113, 0.2); color: var(--red); border: 1px solid var(--red); }
     .rec-ESPERAR { background: rgba(139, 146, 176, 0.2); color: var(--text-muted); border: 1px solid var(--text-muted); }
 
-    /* Chat */
-    .chat-container { height: 400px; overflow-y: auto; padding: 16px; background: var(--surface2); border-radius: var(--radius); margin-bottom: 12px; }
+    /* Chat contextual (burbuja + panel lateral) */
+    .chat-fab {
+      position: fixed;
+      bottom: 22px;
+      right: 22px;
+      width: 54px;
+      height: 54px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #0a0a0a;
+      font-size: 24px;
+      border: none;
+      cursor: pointer;
+      z-index: 1100;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.15s, background 0.15s;
+    }
+    .chat-fab:hover { background: var(--accent-hover); transform: scale(1.06); }
+
+    .chat-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      height: 100vh;
+      width: 400px;
+      max-width: 100vw;
+      background: var(--sidebar);
+      border-left: 1px solid var(--border);
+      z-index: 1200;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(105%);
+      transition: transform 0.25s ease;
+      box-shadow: -12px 0 40px rgba(0,0,0,0.5);
+    }
+    .chat-panel.open { transform: translateX(0); }
+    .chat-panel-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border-soft);
+      color: var(--text-strong);
+    }
+    .chat-panel-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+    }
+    .chat-panel-footer {
+      padding: 12px 16px 14px;
+      border-top: 1px solid var(--border-soft);
+    }
+
     .chat-message { margin-bottom: 16px; }
     .chat-user { text-align: right; }
-    .chat-bubble { display: inline-block; padding: 10px 14px; border-radius: 12px; max-width: 80%; line-height: 1.5; }
+    .chat-bubble { display: inline-block; padding: 10px 14px; border-radius: 12px; max-width: 85%; line-height: 1.5; text-align: left; font-size: 13px; }
     .chat-user .chat-bubble { background: var(--accent); color: #0a0a0a; font-weight: 500; border-radius: 12px 12px 4px 12px; }
     .chat-ai .chat-bubble { background: rgba(255,255,255,0.05); color: var(--text); border-radius: 12px 12px 12px 4px; border: 1px solid var(--border); }
     .chat-input-row { display: flex; gap: 10px; }
@@ -242,6 +309,32 @@
     .alert-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); }
     .alert-item:last-child { border-bottom: none; }
     .alert-triggered { opacity: 0.5; }
+
+    /* Chips (bandeja de comparación) */
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 4px 6px 4px 12px;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      margin: 0 6px 6px 0;
+    }
+    .chip button {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 0 4px;
+      width: auto;
+    }
+    .chip button:hover { color: var(--red); }
 
     /* Loading */
     .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
@@ -268,16 +361,16 @@
     .tag-blue { background: rgba(163, 230, 53, 0.1); color: var(--accent); }
     .tag-yellow { background: rgba(251, 191, 36, 0.12); color: var(--yellow); }
 
-    /* Toast */
+    /* Toast (arriba de la burbuja del chat) */
     #toast {
-      position: fixed; bottom: 20px; right: 20px;
+      position: fixed; bottom: 90px; right: 20px;
       background: var(--surface2); border: 1px solid var(--border);
       color: var(--text); padding: 12px 20px; border-radius: 10px;
       font-size: 13px; z-index: 9999; display: none;
       box-shadow: 0 8px 32px rgba(0,0,0,0.4);
     }
 
-    .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
 
     /* Mobile */
     @media (max-width: 900px) {
@@ -289,6 +382,7 @@
       .sidebar-logo span:not(.logo-badge), .nav-item span { display: none; }
       .main { margin-left: 64px; padding: 16px; }
       .grid-4, .grid-2, .grid-3 { grid-template-columns: 1fr; }
+      .chat-panel { width: 100vw; }
     }
 
     /* ── Noticias ── */
@@ -422,28 +516,24 @@
 <body>
 
 <div class="layout">
-  <!-- Sidebar -->
+  <!-- Sidebar: 5 secciones -->
   <nav class="sidebar">
     <div class="sidebar-logo"><span class="logo-badge">IP</span><span>IB Portfolio</span></div>
-    <div class="nav-item active" onclick="navigate('portfolio')">📊 <span>Portfolio</span></div>
-    <div class="nav-item" onclick="navigate('compare')">⚖️ <span>Comparar</span></div>
-    <div class="nav-item" onclick="navigate('analyze')">🤖 <span>Análisis IA</span></div>
-    <div class="nav-item" onclick="navigate('chat')">💬 <span>Chat IA</span></div>
-    <div class="nav-item" onclick="navigate('alerts')">🔔 <span>Alertas</span></div>
-    <div class="nav-item" onclick="navigate('radar')">🎯 <span>Radar</span></div>
-    <div class="nav-item" onclick="navigate('smart')">
-      🧠 <span>Smart Alerts</span>
+    <div class="nav-item active" id="nav-hoy" onclick="navigate('hoy')">🏠 <span>Hoy</span></div>
+    <div class="nav-item" id="nav-explorar" onclick="navigate('explorar')">🔍 <span>Explorar</span></div>
+    <div class="nav-item" id="nav-alertas" onclick="navigate('alertas')">
+      🔔 <span>Alertas</span>
       <span id="smart-badge" style="display:none;background:var(--red);color:#fff;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:auto">0</span>
     </div>
-    <div class="nav-item" onclick="navigate('news')">📰 <span>Noticias</span></div>
-    <div class="nav-item" onclick="navigate('setup')">⚙️ <span>Configuración</span></div>
+    <div class="nav-item" id="nav-news" onclick="navigate('news')">📰 <span>Noticias</span></div>
+    <div class="nav-item" id="nav-setup" onclick="navigate('setup')">⚙️ <span>Ajustes</span></div>
   </nav>
 
   <main class="main">
 
-    <!-- ── PORTFOLIO ────────────────────────────────────── -->
-    <div id="page-portfolio" class="page active">
-      <div class="page-title">📊 Mi Portfolio
+    <!-- ── HOY ──────────────────────────────────────────── -->
+    <div id="page-hoy" class="page active">
+      <div class="page-title">🏠 Hoy
         <button class="btn btn-outline btn-sm" onclick="loadPortfolio(true)">↻ Actualizar</button>
       </div>
 
@@ -454,7 +544,53 @@
         <div class="card"><div class="card-title">Última actualización</div><div class="metric-value" style="font-size:16px" id="m-updated">—</div><div class="metric-sub">—</div></div>
       </div>
 
-      <div class="card" style="margin-bottom:24px">
+      <!-- Evolución del portfolio -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="section-header">
+          <div class="card-title" style="margin:0">Evolución del portfolio</div>
+          <div style="display:flex;gap:6px">
+            <button id="evo-btn-30" class="btn btn-outline btn-sm" onclick="setEvoRange(30)">30d</button>
+            <button id="evo-btn-90" class="btn btn-primary btn-sm" onclick="setEvoRange(90)">90d</button>
+            <button id="evo-btn-365" class="btn btn-outline btn-sm" onclick="setEvoRange(365)">1 año</button>
+          </div>
+        </div>
+        <div id="evolution-msg" style="display:none;text-align:center;padding:32px 20px;color:var(--text-muted);line-height:1.6"></div>
+        <div id="evolution-wrap"><canvas id="chart-evolution" height="80"></canvas></div>
+      </div>
+
+      <!-- Smart alerts sin ver -->
+      <div id="hoy-smart-section" style="display:none;margin-bottom:20px">
+        <div class="card" style="border-color:var(--green)">
+          <div class="section-header">
+            <div class="card-title" style="margin:0;color:var(--green)">🧠 Oportunidades detectadas — sin ver</div>
+            <button class="btn btn-outline btn-sm" onclick="markHoySmartSeen()">✓ Marcar vistas</button>
+          </div>
+          <div id="hoy-smart-list"></div>
+        </div>
+      </div>
+
+      <!-- Alertas de precio disparadas -->
+      <div id="hoy-alerts-section" style="display:none;margin-bottom:20px">
+        <div class="card" style="border-color:var(--yellow)">
+          <div class="section-header">
+            <div class="card-title" style="margin:0;color:var(--yellow)">🔔 Alertas de precio disparadas</div>
+            <button class="btn btn-outline btn-sm" onclick="navigate('alertas')">Ver alertas →</button>
+          </div>
+          <div id="hoy-alerts-list"></div>
+        </div>
+      </div>
+
+      <!-- Noticias del portfolio -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="section-header">
+          <div class="card-title" style="margin:0">⭐ Noticias de tu portfolio</div>
+          <button class="btn btn-outline btn-sm" onclick="navigate('news')">Ver todas →</button>
+        </div>
+        <div id="hoy-news-list"><div class="loading-overlay" style="padding:20px"><div class="spinner"></div> Buscando noticias...</div></div>
+      </div>
+
+      <!-- Posiciones -->
+      <div class="card" style="margin-bottom:20px">
         <div class="section-header">
           <div class="card-title" style="margin:0">Posiciones</div>
           <div style="display:flex;gap:8px">
@@ -474,19 +610,39 @@
       </div>
     </div>
 
-    <!-- ── COMPARAR ─────────────────────────────────────── -->
-    <div id="page-compare" class="page">
-      <div class="page-title">⚖️ Comparar Activos</div>
+    <!-- ── EXPLORAR (analizar + comparar + radar) ───────── -->
+    <div id="page-explorar" class="page">
+      <div class="page-title">🔍 Explorar</div>
 
-      <div class="card" style="margin-bottom:24px">
-        <div class="form-row">
+      <!-- Buscador -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="form-row" style="margin-bottom:0">
           <div class="form-group">
-            <label class="form-label">Símbolos (separados por coma)</label>
-            <input id="compare-input" placeholder="AAPL, MSFT, GOOGL, NVDA" value="AAPL, MSFT, GOOGL">
+            <label class="form-label">Buscar activo por ticker</label>
+            <input id="explore-input" placeholder="AAPL, NVDA, MELI..." style="text-transform:uppercase"
+                   onkeydown="if(event.key==='Enter')searchAsset()">
           </div>
-          <div class="form-group" style="max-width:140px">
-            <label class="form-label">Período</label>
-            <select id="compare-period">
+          <button class="btn btn-primary" onclick="searchAsset()">🔍 Buscar</button>
+        </div>
+      </div>
+
+      <!-- Vista de detalle del activo -->
+      <div id="asset-detail" class="card" style="display:none;margin-bottom:20px;border-color:rgba(163,230,53,0.25)">
+        <div class="section-header">
+          <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+            <strong id="detail-title" style="font-size:20px;color:var(--text-strong);font-family:var(--mono)">—</strong>
+            <span id="detail-name" style="color:var(--text-muted);font-size:13px"></span>
+          </div>
+          <button onclick="closeAssetDetail()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px;width:auto">✕</button>
+        </div>
+
+        <div class="grid-4" id="detail-metrics" style="margin-bottom:16px"></div>
+
+        <div style="margin-bottom:16px">
+          <div class="section-header">
+            <div class="card-title" style="margin:0">Precio histórico</div>
+            <select id="detail-period" style="max-width:130px" onchange="loadDetailChart()">
+              <option value="1mo">1 mes</option>
               <option value="3mo">3 meses</option>
               <option value="6mo">6 meses</option>
               <option value="1y" selected>1 año</option>
@@ -494,12 +650,59 @@
               <option value="5y">5 años</option>
             </select>
           </div>
-          <button class="btn btn-primary" onclick="runCompare()">Comparar</button>
+          <canvas id="chart-detail" height="70"></canvas>
+        </div>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <button class="btn btn-primary btn-sm" onclick="detailAnalyze()">🤖 Análisis IA</button>
+          <button class="btn btn-outline btn-sm" onclick="toggleDetailAlert()">🔔 Crear alerta</button>
+          <button class="btn btn-outline btn-sm" onclick="addToCompare(currentDetailSymbol)">📊 Comparar</button>
+        </div>
+
+        <!-- Form de alerta inline (sin salir de la vista) -->
+        <div id="detail-alert-form" style="display:none;background:var(--surface2);border-radius:8px;padding:14px;margin-bottom:12px">
+          <div class="form-row" style="margin-bottom:0">
+            <div class="form-group" style="max-width:150px">
+              <label class="form-label">Condición</label>
+              <select id="d-alert-condition">
+                <option value="below">Baja a ≤</option>
+                <option value="above">Sube a ≥</option>
+              </select>
+            </div>
+            <div class="form-group" style="max-width:150px">
+              <label class="form-label">Precio objetivo ($)</label>
+              <input id="d-alert-price" type="number" step="0.01" placeholder="0.00">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Nota (opcional)</label>
+              <input id="d-alert-note" placeholder="ej: zona de compra">
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="createDetailAlert()">+ Crear alerta</button>
+          </div>
+        </div>
+
+        <div id="detail-analysis-loading" style="display:none" class="loading-overlay"><div class="spinner"></div> Analizando con IA...</div>
+        <div id="detail-analysis"></div>
+      </div>
+
+      <!-- Bandeja de comparación -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-title">📊 Bandeja de comparación</div>
+        <div id="compare-chips" style="margin-bottom:10px"><span style="color:var(--text-faint);font-size:12px">Agregá símbolos desde la vista de detalle o escribilos acá abajo.</span></div>
+        <div class="form-row" style="margin-bottom:0">
+          <div class="form-group" style="max-width:260px">
+            <label class="form-label">Agregar símbolos</label>
+            <input id="compare-add" placeholder="AAPL, MSFT..." style="text-transform:uppercase"
+                   onkeydown="if(event.key==='Enter')addCompareFromInput()">
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="addCompareFromInput()">+ Agregar</button>
+          <button class="btn btn-primary" onclick="runCompare()">⚖️ Comparar</button>
         </div>
       </div>
 
-      <div id="compare-results" style="display:none">
-        <div class="grid-2" style="margin-bottom:24px">
+      <div id="compare-loading" style="display:none" class="loading-overlay"><div class="spinner"></div> Cargando datos...</div>
+      <div id="compare-results" style="display:none;margin-bottom:20px">
+        <div class="grid-2" style="margin-bottom:0">
           <div class="card">
             <div class="card-title">Retorno normalizado (base 100)</div>
             <canvas id="chart-compare"></canvas>
@@ -510,137 +713,12 @@
           </div>
         </div>
       </div>
-      <div id="compare-loading" style="display:none" class="loading-overlay"><div class="spinner"></div> Cargando datos...</div>
-    </div>
 
-    <!-- ── ANÁLISIS IA ───────────────────────────────────── -->
-    <div id="page-analyze" class="page">
-      <div class="page-title">🤖 Análisis con IA</div>
-
-      <div class="card" style="margin-bottom:24px">
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Símbolo a analizar</label>
-            <input id="analyze-input" placeholder="AAPL" style="text-transform:uppercase">
-          </div>
-          <button class="btn btn-primary" onclick="runAnalysis()">Analizar con Claude</button>
-        </div>
-        <div style="font-size:12px;color:var(--text-muted)">⚠️ Requiere API key de Anthropic configurada en config.py</div>
-      </div>
-
-      <div id="analyze-loading" style="display:none" class="loading-overlay"><div class="spinner"></div> Analizando con IA...</div>
-      <div id="analyze-results"></div>
-    </div>
-
-    <!-- ── CHAT IA ───────────────────────────────────────── -->
-    <div id="page-chat" class="page">
-      <div class="page-title">💬 Chat con IA</div>
-
-      <div class="card">
-        <div class="chat-container" id="chat-messages">
-          <div class="chat-message chat-ai">
-            <div class="chat-bubble">¡Hola! Soy tu asistente de inversiones. Podés preguntarme sobre mercados, estrategias, comparar activos o pedir análisis. Tengo contexto de tu portfolio cuando está cargado. ¿En qué puedo ayudarte?</div>
-          </div>
-        </div>
-        <div class="chat-input-row">
-          <input id="chat-input" placeholder="Preguntá sobre mercados, estrategias, activos..." onkeydown="if(event.key==='Enter')sendChat()">
-          <button class="btn btn-primary" onclick="sendChat()">Enviar</button>
-        </div>
-        <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">⚠️ Requiere API key de Anthropic en config.py</div>
-      </div>
-    </div>
-
-    <!-- ── ALERTAS ──────────────────────────────────────── -->
-    <div id="page-alerts" class="page">
-      <div class="page-title">🔔 Alertas de Precio</div>
-
-      <!-- Tabs -->
-      <div style="display:flex;gap:8px;margin-bottom:20px">
-        <button id="tab-price" class="btn btn-primary btn-sm" onclick="switchAlertTab('price')">Precio fijo</button>
-        <button id="tab-pct" class="btn btn-outline btn-sm" onclick="switchAlertTab('pct')">% de caída</button>
-      </div>
-
-      <!-- Tab: Precio fijo -->
-      <div id="alert-tab-price" class="card" style="margin-bottom:24px">
-        <div class="card-title">Alerta por precio absoluto</div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Símbolo</label>
-            <input id="alert-symbol" placeholder="AAPL" style="text-transform:uppercase">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Condición</label>
-            <select id="alert-condition">
-              <option value="above">Sube a ≥</option>
-              <option value="below">Baja a ≤</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Precio objetivo ($)</label>
-            <input id="alert-price" type="number" placeholder="200.00" step="0.01">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Nota (opcional)</label>
-            <input id="alert-note" placeholder="ej: nivel de soporte">
-          </div>
-          <button class="btn btn-primary" onclick="addAlert()">+ Crear</button>
-        </div>
-      </div>
-
-      <!-- Tab: % de caída -->
-      <div id="alert-tab-pct" class="card" style="margin-bottom:24px;display:none">
-        <div class="card-title">Alerta por caída porcentual</div>
-        <p style="color:var(--text-muted);font-size:12px;margin-bottom:16px">
-          Te avisa cuando el activo baje X% desde su precio actual o desde tu costo promedio — ideal para identificar puntos de entrada.
-        </p>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Símbolo</label>
-            <input id="pct-symbol" placeholder="NVDA" style="text-transform:uppercase" oninput="fetchCurrentPrice()">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Referencia</label>
-            <select id="pct-ref-type" onchange="updatePctPreview()">
-              <option value="current">Precio actual de mercado</option>
-              <option value="cost">Mi costo promedio</option>
-            </select>
-          </div>
-          <div class="form-group" id="pct-ref-price-group">
-            <label class="form-label">Precio de referencia ($)</label>
-            <input id="pct-ref-price" type="number" placeholder="0.00" step="0.01" oninput="updatePctPreview()">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Caída %</label>
-            <input id="pct-drop" type="number" placeholder="10" min="1" max="90" step="0.5" oninput="updatePctPreview()">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Nota (opcional)</label>
-            <input id="pct-note" placeholder="ej: zona de compra">
-          </div>
-          <button class="btn btn-primary" onclick="addPctAlert()">+ Crear</button>
-        </div>
-        <div id="pct-preview" style="margin-top:12px;padding:12px;background:var(--surface2);border-radius:8px;font-size:13px;display:none">
-          📍 Alerta se disparará cuando <strong id="pct-preview-symbol">—</strong> llegue a
-          <strong id="pct-preview-target" style="color:var(--yellow)">—</strong>
-          <span id="pct-preview-detail" style="color:var(--text-muted)"></span>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="section-header">
-          <div class="card-title" style="margin:0">Alertas configuradas</div>
-          <button class="btn btn-outline btn-sm" onclick="checkAlerts()">↻ Verificar ahora</button>
-        </div>
-        <div id="alerts-list"><div class="loading-overlay"><div class="spinner"></div> Cargando...</div></div>
-      </div>
-    </div>
-
-    <!-- ── RADAR ────────────────────────────────────────── -->
-    <div id="page-radar" class="page">
-      <div class="page-title">🎯 Radar de Oportunidades</div>
+      <!-- Radar -->
+      <div class="section-title">🎯 Radar de Oportunidades</div>
 
       <div class="card" style="margin-bottom:20px">
-        <div class="form-row" style="align-items:flex-end">
+        <div class="form-row" style="align-items:flex-end;margin-bottom:0">
           <div class="form-group">
             <label class="form-label">Agregar símbolos extra (opcional)</label>
             <input id="radar-extra" placeholder="TSM, SOFI, MELI, IONQ..." style="text-transform:uppercase">
@@ -648,7 +726,7 @@
           <button class="btn btn-primary" onclick="runRadar(true)">↻ Escanear ahora</button>
         </div>
         <div style="font-size:12px;color:var(--text-muted);margin-top:8px">
-          Escanea ~50 activos en Tech/IA, Defensa, Salud, Finanzas, Energía y Consumo + los que agregues.
+          Escanea ~50 activos en Tech/IA, Defensa, Salud, Finanzas, Energía y Consumo + los que agregues. Click en una fila para ver el detalle del activo.
         </div>
       </div>
 
@@ -677,7 +755,7 @@
       </div>
 
       <div id="radar-loading" style="display:none" class="loading-overlay">
-        <div class="spinner"></div> Escaneando mercado... (20–40 seg)
+        <div class="spinner"></div> Escaneando mercado...
       </div>
 
       <div id="radar-content" style="display:none">
@@ -686,74 +764,179 @@
       </div>
     </div>
 
-    <!-- ── SMART ALERTS ────────────────────────────────── -->
-    <div id="page-smart" class="page">
-      <div class="page-title">🧠 Smart Alerts
-        <span style="font-size:13px;font-weight:400;color:var(--text-muted)">aviso automático cuando alto potencial + buena entrada coinciden</span>
+    <!-- ── ALERTAS (precio + smart + track record) ──────── -->
+    <div id="page-alertas" class="page">
+      <div class="page-title">🔔 Alertas</div>
+
+      <!-- Tabs de sección -->
+      <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
+        <button id="atab-mis" class="btn btn-primary btn-sm" onclick="switchAlertsSection('mis')">🔔 Mis alertas</button>
+        <button id="atab-smart" class="btn btn-outline btn-sm" onclick="switchAlertsSection('smart')">🧠 Inteligentes</button>
+        <button id="atab-track" class="btn btn-outline btn-sm" onclick="switchAlertsSection('track')">📈 Track record</button>
       </div>
 
-      <!-- Config -->
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-title">Configuración</div>
-        <div class="form-row" style="align-items:flex-end">
-          <div class="form-group" style="max-width:200px">
-            <label class="form-label">Potencial mínimo 🚀</label>
-            <div style="display:flex;align-items:center;gap:8px">
-              <input type="range" id="cfg-growth" min="30" max="85" step="5" value="55"
-                oninput="document.getElementById('cfg-growth-val').textContent=this.value"
-                style="flex:1;accent-color:var(--accent)">
-              <span id="cfg-growth-val" style="min-width:28px;font-weight:700;color:#a78bfa">55</span>
+      <!-- ── Sección: Mis alertas ── -->
+      <div id="alerts-sec-mis">
+        <div style="display:flex;gap:8px;margin-bottom:20px">
+          <button id="tab-price" class="btn btn-primary btn-sm" onclick="switchAlertTab('price')">Precio fijo</button>
+          <button id="tab-pct" class="btn btn-outline btn-sm" onclick="switchAlertTab('pct')">% de caída</button>
+        </div>
+
+        <!-- Tab: Precio fijo -->
+        <div id="alert-tab-price" class="card" style="margin-bottom:24px">
+          <div class="card-title">Alerta por precio absoluto</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Símbolo</label>
+              <input id="alert-symbol" placeholder="AAPL" style="text-transform:uppercase">
             </div>
-          </div>
-          <div class="form-group" style="max-width:200px">
-            <label class="form-label">Entrada mínima 📍</label>
-            <div style="display:flex;align-items:center;gap:8px">
-              <input type="range" id="cfg-entry" min="30" max="85" step="5" value="55"
-                oninput="document.getElementById('cfg-entry-val').textContent=this.value"
-                style="flex:1;accent-color:var(--accent)">
-              <span id="cfg-entry-val" style="min-width:28px;font-weight:700;color:var(--accent)">55</span>
+            <div class="form-group">
+              <label class="form-label">Condición</label>
+              <select id="alert-condition">
+                <option value="above">Sube a ≥</option>
+                <option value="below">Baja a ≤</option>
+              </select>
             </div>
+            <div class="form-group">
+              <label class="form-label">Precio objetivo ($)</label>
+              <input id="alert-price" type="number" placeholder="200.00" step="0.01">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Nota (opcional)</label>
+              <input id="alert-note" placeholder="ej: nivel de soporte">
+            </div>
+            <button class="btn btn-primary" onclick="addAlert()">+ Crear</button>
           </div>
-          <div class="form-group" style="max-width:180px">
-            <label class="form-label">Chequeo automático</label>
-            <select id="cfg-interval">
-              <option value="15">Cada 15 min</option>
-              <option value="30" selected>Cada 30 min</option>
-              <option value="60">Cada 1 hora</option>
-              <option value="120">Cada 2 horas</option>
-            </select>
-          </div>
-          <div class="form-group" style="max-width:200px">
-            <label class="form-label">Símbolos extra</label>
-            <input id="cfg-extra" placeholder="IONQ, SOFI, MELI..." style="text-transform:uppercase">
-          </div>
-          <button class="btn btn-primary" onclick="saveSmartConfig()">Guardar</button>
-          <button class="btn btn-outline" onclick="runSmartCheck()">▶ Chequear ahora</button>
         </div>
-        <div style="margin-top:10px;font-size:12px;color:var(--text-muted)">
-          💡 Los chequeos automáticos corren mientras el browser esté abierto. Una acción no se notifica dos veces el mismo día.
+
+        <!-- Tab: % de caída -->
+        <div id="alert-tab-pct" class="card" style="margin-bottom:24px;display:none">
+          <div class="card-title">Alerta por caída porcentual</div>
+          <p style="color:var(--text-muted);font-size:12px;margin-bottom:16px">
+            Te avisa cuando el activo baje X% desde su precio actual o desde tu costo promedio — ideal para identificar puntos de entrada.
+          </p>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Símbolo</label>
+              <input id="pct-symbol" placeholder="NVDA" style="text-transform:uppercase" oninput="fetchCurrentPrice()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Referencia</label>
+              <select id="pct-ref-type" onchange="updatePctPreview()">
+                <option value="current">Precio actual de mercado</option>
+                <option value="cost">Mi costo promedio</option>
+              </select>
+            </div>
+            <div class="form-group" id="pct-ref-price-group">
+              <label class="form-label">Precio de referencia ($)</label>
+              <input id="pct-ref-price" type="number" placeholder="0.00" step="0.01" oninput="updatePctPreview()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Caída %</label>
+              <input id="pct-drop" type="number" placeholder="10" min="1" max="90" step="0.5" oninput="updatePctPreview()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Nota (opcional)</label>
+              <input id="pct-note" placeholder="ej: zona de compra">
+            </div>
+            <button class="btn btn-primary" onclick="addPctAlert()">+ Crear</button>
+          </div>
+          <div id="pct-preview" style="margin-top:12px;padding:12px;background:var(--surface2);border-radius:8px;font-size:13px;display:none">
+            📍 Alerta se disparará cuando <strong id="pct-preview-symbol">—</strong> llegue a
+            <strong id="pct-preview-target" style="color:var(--yellow)">—</strong>
+            <span id="pct-preview-detail" style="color:var(--text-muted)"></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-header">
+            <div class="card-title" style="margin:0">Alertas configuradas</div>
+            <button class="btn btn-outline btn-sm" onclick="checkAlerts()">↻ Verificar ahora</button>
+          </div>
+          <div id="alerts-list"><div class="loading-overlay"><div class="spinner"></div> Cargando...</div></div>
         </div>
       </div>
 
-      <div id="smart-check-loading" style="display:none" class="loading-overlay">
-        <div class="spinner"></div> Escaneando oportunidades... (20–40 seg)
-      </div>
+      <!-- ── Sección: Alertas inteligentes ── -->
+      <div id="alerts-sec-smart" style="display:none">
+        <p style="color:var(--text-muted);font-size:13px;margin-bottom:16px">
+          Aviso automático cuando alto potencial 🚀 + buena entrada 📍 coinciden. El chequeo corre solo en el servidor.
+        </p>
 
-      <!-- Notificaciones nuevas -->
-      <div id="smart-new-section" style="display:none;margin-bottom:24px">
-        <div class="card" style="border-color:var(--green)">
-          <div class="card-title" style="color:var(--green)">🔥 Oportunidades detectadas ahora</div>
-          <div id="smart-new-list"></div>
+        <!-- Config -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-title">Configuración</div>
+          <div class="form-row" style="align-items:flex-end">
+            <div class="form-group" style="max-width:200px">
+              <label class="form-label">Potencial mínimo 🚀</label>
+              <div style="display:flex;align-items:center;gap:8px">
+                <input type="range" id="cfg-growth" min="30" max="85" step="5" value="55"
+                  oninput="document.getElementById('cfg-growth-val').textContent=this.value"
+                  style="flex:1;accent-color:var(--accent)">
+                <span id="cfg-growth-val" style="min-width:28px;font-weight:700;color:#a78bfa">55</span>
+              </div>
+            </div>
+            <div class="form-group" style="max-width:200px">
+              <label class="form-label">Entrada mínima 📍</label>
+              <div style="display:flex;align-items:center;gap:8px">
+                <input type="range" id="cfg-entry" min="30" max="85" step="5" value="55"
+                  oninput="document.getElementById('cfg-entry-val').textContent=this.value"
+                  style="flex:1;accent-color:var(--accent)">
+                <span id="cfg-entry-val" style="min-width:28px;font-weight:700;color:var(--accent)">55</span>
+              </div>
+            </div>
+            <div class="form-group" style="max-width:180px">
+              <label class="form-label">Chequeo automático</label>
+              <select id="cfg-interval">
+                <option value="15">Cada 15 min</option>
+                <option value="30" selected>Cada 30 min</option>
+                <option value="60">Cada 1 hora</option>
+                <option value="120">Cada 2 horas</option>
+              </select>
+            </div>
+            <div class="form-group" style="max-width:200px">
+              <label class="form-label">Símbolos extra</label>
+              <input id="cfg-extra" placeholder="IONQ, SOFI, MELI..." style="text-transform:uppercase">
+            </div>
+            <button class="btn btn-primary" onclick="saveSmartConfig()">Guardar</button>
+            <button class="btn btn-outline" onclick="runSmartCheck()">▶ Chequear ahora</button>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:var(--text-muted)">
+            💡 El chequeo automático corre en el servidor aunque cierres el browser. Una acción no se notifica dos veces el mismo día.
+          </div>
+        </div>
+
+        <div id="smart-check-loading" style="display:none" class="loading-overlay">
+          <div class="spinner"></div> Escaneando oportunidades...
+        </div>
+
+        <!-- Notificaciones nuevas -->
+        <div id="smart-new-section" style="display:none;margin-bottom:24px">
+          <div class="card" style="border-color:var(--green)">
+            <div class="card-title" style="color:var(--green)">🔥 Oportunidades detectadas ahora</div>
+            <div id="smart-new-list"></div>
+          </div>
+        </div>
+
+        <!-- Historial -->
+        <div class="card">
+          <div class="section-header">
+            <div class="card-title" style="margin:0">Historial de detecciones</div>
+            <span style="font-size:12px;color:var(--text-muted)">máx. 50 últimas</span>
+          </div>
+          <div id="smart-history-list"><div class="loading-overlay" style="padding:20px">Cargando historial...</div></div>
         </div>
       </div>
 
-      <!-- Historial -->
-      <div class="card">
+      <!-- ── Sección: Track record ── -->
+      <div id="alerts-sec-track" style="display:none">
         <div class="section-header">
-          <div class="card-title" style="margin:0">Historial de detecciones</div>
-          <span style="font-size:12px;color:var(--text-muted)">máx. 50 últimas</span>
+          <p style="color:var(--text-muted);font-size:13px;margin:0">
+            ¿Cómo les fue a las señales inteligentes desde su detección, comparadas contra SPY en el mismo período?
+          </p>
+          <button class="btn btn-outline btn-sm" onclick="loadTrackRecord(true)">↻ Refrescar</button>
         </div>
-        <div id="smart-history-list"><div class="loading-overlay" style="padding:20px">Cargando historial...</div></div>
+        <div id="track-content"><div class="loading-overlay"><div class="spinner"></div> Calculando track record...</div></div>
       </div>
     </div>
 
@@ -762,10 +945,6 @@
       <div class="page-title">📰 Noticias</div>
 
       <div style="display:flex;gap:10px;align-items:center;margin-bottom:18px;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);cursor:pointer;width:auto">
-          <input type="checkbox" id="news-portfolio-only" style="width:auto;accent-color:var(--accent)" onchange="renderCurrentNews()">
-          Solo mi portfolio
-        </label>
         <button class="btn btn-outline btn-sm" onclick="loadNews(false, true)">🔄 Actualizar</button>
         <button class="btn btn-primary btn-sm" onclick="loadNews(true, true)" title="Genera contexto con Haiku (~$0.01)">✨ Contexto IA</button>
         <span id="news-status" style="color:var(--text-faint);font-size:11px;margin-left:auto;font-family:var(--mono)"></span>
@@ -774,16 +953,18 @@
       <div class="news-box">
         <!-- Tabs de sección -->
         <div class="news-tabbar">
-          <button id="ntab-TECH_IA"   class="news-tab active" onclick="switchNewsTab('TECH_IA')">🤖 Tech/IA</button>
+          <button id="ntab-PORTFOLIO"  class="news-tab active" onclick="switchNewsTab('PORTFOLIO')">⭐ Mi Portfolio</button>
+          <button id="ntab-TECH_IA"    class="news-tab" onclick="switchNewsTab('TECH_IA')">🤖 Tech/IA</button>
           <button id="ntab-IA_TECNICA" class="news-tab" onclick="switchNewsTab('IA_TECNICA')">🔬 IA Técnica</button>
-          <button id="ntab-STARTUPS"  class="news-tab" onclick="switchNewsTab('STARTUPS')">🚀 Startups</button>
-          <button id="ntab-VOCES"     class="news-tab" onclick="switchNewsTab('VOCES')">🗣️ Voces IA</button>
-          <button id="ntab-MERCADOS"  class="news-tab" onclick="switchNewsTab('MERCADOS')">📈 Mercados</button>
+          <button id="ntab-STARTUPS"   class="news-tab" onclick="switchNewsTab('STARTUPS')">🚀 Startups</button>
+          <button id="ntab-VOCES"      class="news-tab" onclick="switchNewsTab('VOCES')">🗣️ Voces IA</button>
+          <button id="ntab-MERCADOS"   class="news-tab" onclick="switchNewsTab('MERCADOS')">📈 Mercados</button>
         </div>
 
-        <div id="news-TECH_IA" class="news-section">
+        <div id="news-PORTFOLIO" class="news-section">
           <div class="loading-overlay" style="padding:40px;text-align:center;color:var(--text-muted)">Presioná "Actualizar" para cargar noticias</div>
         </div>
+        <div id="news-TECH_IA" class="news-section" style="display:none"></div>
         <div id="news-IA_TECNICA" class="news-section" style="display:none"></div>
         <div id="news-STARTUPS" class="news-section" style="display:none"></div>
         <div id="news-VOCES" class="news-section" style="display:none"></div>
@@ -791,11 +972,39 @@
       </div>
     </div>
 
-    <!-- ── CONFIGURACIÓN ───────────────────────────────── -->
+    <!-- ── AJUSTES ───────────────────────────────────────── -->
     <div id="page-setup" class="page">
-      <div class="page-title">⚙️ Configuración</div>
+      <div class="page-title">⚙️ Ajustes</div>
 
       <div class="grid-2">
+        <div class="card">
+          <div class="card-title">📂 Cargar portfolio</div>
+          <p style="color:var(--text-muted);margin-bottom:16px;line-height:1.6">
+            Traé tus posiciones desde IBKR (Flex Query), subí un CSV exportado del Activity Statement o cargalas a mano.
+          </p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="loadPortfolio(true);navigate('hoy')">🏦 Traer de IBKR</button>
+            <label class="btn btn-outline btn-sm" style="cursor:pointer">
+              📎 Subir CSV
+              <input type="file" accept=".csv,.txt" style="display:none" onchange="uploadCSV(event)">
+            </label>
+            <button class="btn btn-outline btn-sm" onclick="openManualModal()">+ Cargar manual</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">🤖 Estado del proveedor IA</div>
+          <div id="ai-status"><div class="loading-overlay" style="padding:12px"><div class="spinner"></div> Consultando estado...</div></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">🧠 Smart Alerts</div>
+          <p style="color:var(--text-muted);margin-bottom:16px;line-height:1.6">
+            Los umbrales de detección, el intervalo del chequeo automático y los símbolos extra se configuran en la sección de Alertas.
+          </p>
+          <button class="btn btn-outline btn-sm" onclick="navigate('alertas');switchAlertsSection('smart')">Ir a configuración →</button>
+        </div>
+
         <div class="card">
           <div class="card-title">🏦 Interactive Brokers — Flex Query</div>
           <p style="color:var(--text-muted);margin-bottom:16px;line-height:1.6">
@@ -852,7 +1061,7 @@
           <ol style="color:var(--text-muted);line-height:2;padding-left:18px">
             <li>En IB → <strong style="color:var(--text)">Reports → Activity Statements</strong></li>
             <li>Elegí período "Daily" y formato <strong style="color:var(--text)">CSV</strong></li>
-            <li>Descargá y subí el archivo en la sección <strong style="color:var(--text)">Portfolio → Subir CSV</strong></li>
+            <li>Descargá y subí el archivo con el botón <strong style="color:var(--text)">Subir CSV</strong> de esta página (o desde Hoy → Posiciones)</li>
           </ol>
           <div style="margin-top:16px;padding:12px;background:var(--surface2);border-radius:8px;font-size:12px;color:var(--text-muted)">
             💡 Sin API key. Los precios se actualizan automáticamente desde Yahoo Finance.
@@ -885,6 +1094,27 @@
   </div>
 </div>
 
+<!-- Chat contextual: burbuja flotante + panel lateral -->
+<button class="chat-fab" id="chat-fab" onclick="toggleChat()" title="Chat IA">💬</button>
+
+<div class="chat-panel" id="chat-panel">
+  <div class="chat-panel-header">
+    <strong>💬 Chat IA</strong>
+    <div style="display:flex;gap:8px;margin-left:auto;align-items:center">
+      <button class="btn btn-outline btn-sm" onclick="clearChat()" title="Limpiar conversación">🗑 Limpiar</button>
+      <button onclick="toggleChat()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:17px;width:auto">✕</button>
+    </div>
+  </div>
+  <div class="chat-panel-body" id="chat-messages"></div>
+  <div class="chat-panel-footer">
+    <div class="chat-input-row">
+      <input id="chat-input" placeholder="Preguntá sobre mercados, estrategias, activos..." onkeydown="if(event.key==='Enter')sendChat()">
+      <button class="btn btn-primary" onclick="sendChat()" style="flex-shrink:0">Enviar</button>
+    </div>
+    <div id="chat-context-hint" style="font-size:11px;color:var(--text-muted);margin-top:6px"></div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -892,20 +1122,24 @@ const API = '';
 let portfolioData = null;
 let compareChart = null;
 let allocationChart = null;
+let evolutionChart = null;
+let detailChart = null;
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 function navigate(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById(`page-${page}`).classList.add('active');
-  event.currentTarget.classList.add('active');
+  const nav = document.getElementById(`nav-${page}`);
+  if (nav) nav.classList.add('active');
 
-  if (page === 'portfolio' && !portfolioData) loadPortfolio();
-  if (page === 'alerts') loadAlerts();
-  if (page === 'radar') runRadar();
-  if (page === 'smart') { loadSmartHistory(); mark_seen_api((document.getElementById('smart-badge').textContent !== '0' ? [] : [])); pollUnseenBadge(); }
+  if (page === 'hoy') { if (!portfolioData) loadPortfolio(); loadHoyExtras(); }
+  if (page === 'explorar') runRadar();
+  if (page === 'alertas') { loadAlerts(); loadSmartHistory(); pollUnseenBadge(); }
   // Noticias: carga automática solo si no hay datos aún (usa caché)
   if (page === 'news' && newsTotal() === 0) loadNews(false);
+  if (page === 'setup') loadAIStatus();
+  window.scrollTo(0, 0);
 }
 
 function showToast(msg, duration = 3000) {
@@ -930,6 +1164,14 @@ function fmtPct(n) {
 function fmtMoney(n) {
   if (n == null || isNaN(n)) return '—';
   return '$' + fmt(n);
+}
+
+function fmtBig(n) {
+  if (n == null || isNaN(n) || !n) return '—';
+  if (n >= 1e12) return '$' + (n / 1e12).toFixed(2) + 'T';
+  if (n >= 1e9) return '$' + (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return '$' + (n / 1e6).toFixed(1) + 'M';
+  return '$' + fmt(n, 0);
 }
 
 // ── Portfolio ─────────────────────────────────────────────────────────────────
@@ -958,9 +1200,7 @@ function renderPortfolio(data) {
           su ventana de mantenimiento o limitando pedidos seguidos.</div>` : ''}
         <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:8px">
           <button class="btn btn-primary btn-sm" onclick="loadPortfolio(true)">↻ Reintentar</button>
-          <label class="btn btn-outline btn-sm" style="cursor:pointer">📎 Subir CSV
-            <input type="file" accept=".csv,.txt" style="display:none" onchange="uploadCSV(event)"></label>
-          <button class="btn btn-outline btn-sm" onclick="openManualModal()">+ Cargar manual</button>
+          <button class="btn btn-outline btn-sm" onclick="navigate('setup')">⚙️ Ir a Ajustes</button>
         </div>
       </div>`;
     document.getElementById('m-total').textContent = '—';
@@ -968,7 +1208,7 @@ function renderPortfolio(data) {
   }
 
   const s = data.summary || {};
-  document.getElementById('m-total').textContent = fmtMoney(s.total_value).replace('<span', '').replace(/class="[^"]*"/, '').replace('</span>', '');
+  document.getElementById('m-total').textContent = fmtMoney(s.total_value);
   const pnlEl = document.getElementById('m-pnl');
   pnlEl.innerHTML = fmtPct(s.total_pnl_pct);
   document.getElementById('m-pnl-pct').textContent = fmtMoney(s.total_unrealized_pnl);
@@ -977,14 +1217,21 @@ function renderPortfolio(data) {
 
   const positions = data.positions || [];
   if (!positions.length) {
-    document.getElementById('positions-table').innerHTML = '<div class="loading-overlay">Sin posiciones. Conectá IBKR o subí un CSV.</div>';
+    // Estado vacío: guiar a Ajustes para cargar el portfolio
+    document.getElementById('positions-table').innerHTML = `
+      <div style="text-align:center;padding:40px 20px;color:var(--text-muted)">
+        <div style="font-size:28px;margin-bottom:10px">📭</div>
+        <div style="margin-bottom:16px;line-height:1.6">Todavía no cargaste tu portfolio.<br>
+        Conectá IBKR, subí un CSV o cargá tus posiciones a mano.</div>
+        <button class="btn btn-primary btn-sm" onclick="navigate('setup')">⚙️ Ir a Ajustes para cargarlo</button>
+      </div>`;
     return;
   }
 
   const rows = positions.map(p => {
     const pnlPct = p.unrealized_pnl_pct ?? (p.avg_cost && p.quantity ?
       ((p.current_price - p.avg_cost) / p.avg_cost * 100) : 0);
-    return `<tr>
+    return `<tr onclick="openAssetDetail('${p.symbol}')" style="cursor:pointer" title="Ver detalle de ${p.symbol}">
       <td><strong>${p.symbol}</strong><br><small style="color:var(--text-muted)">${p.name || ''}</small></td>
       <td>${fmt(p.quantity, 4)}</td>
       <td>${fmtMoney(p.avg_cost)}</td>
@@ -993,9 +1240,9 @@ function renderPortfolio(data) {
       <td>${fmtPct(pnlPct)}</td>
       <td>${p.pe_ratio ? fmt(p.pe_ratio, 1) : '—'}</td>
       <td><span class="tag tag-blue">${p.sector || p.asset_class || '—'}</span></td>
-      <td>
-        <button class="btn btn-outline btn-sm" onclick="quickAnalyze('${p.symbol}')">🤖</button>
-        <button class="btn btn-outline btn-sm" onclick="setAlertFromPosition('${p.symbol}', ${p.current_price || p.mark_price})">🔔</button>
+      <td style="white-space:nowrap">
+        <button class="btn btn-outline btn-sm" title="Análisis IA" onclick="event.stopPropagation();quickAnalyze('${p.symbol}')">🤖</button>
+        <button class="btn btn-outline btn-sm" title="Crear alerta" onclick="event.stopPropagation();setAlertFromPosition('${p.symbol}', ${p.current_price || p.mark_price || 0})">🔔</button>
       </td>
     </tr>`;
   }).join('');
@@ -1037,6 +1284,154 @@ function renderAllocationChart(positions) {
   });
 }
 
+// ── Hoy: evolución del portfolio ──────────────────────────────────────────────
+let evoDays = 90;
+
+function setEvoRange(days) {
+  evoDays = days;
+  [30, 90, 365].forEach(d => {
+    const b = document.getElementById(`evo-btn-${d}`);
+    if (b) b.className = d === days ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
+  });
+  loadEvolution();
+}
+
+async function loadEvolution() {
+  const msg = document.getElementById('evolution-msg');
+  const wrap = document.getElementById('evolution-wrap');
+  try {
+    const resp = await fetch(`/api/portfolio/history?days=${evoDays}`);
+    const data = await resp.json();
+    const snaps = data.snapshots || [];
+
+    if (snaps.length < 2) {
+      wrap.style.display = 'none';
+      msg.style.display = 'block';
+      msg.innerHTML = snaps.length === 0
+        ? '📈 Todavía no hay snapshots del portfolio.<br>El historial se construye día a día — volvé mañana.'
+        : '📈 El historial se construye día a día — volvé mañana para ver la evolución.';
+      return;
+    }
+
+    msg.style.display = 'none';
+    wrap.style.display = 'block';
+
+    const ctx = document.getElementById('chart-evolution').getContext('2d');
+    if (evolutionChart) evolutionChart.destroy();
+    evolutionChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: snaps.map(s => s.date),
+        datasets: [{
+          label: 'Valor total',
+          data: snaps.map(s => s.total_value),
+          borderColor: '#a3e635',
+          backgroundColor: 'rgba(163,230,53,0.07)',
+          fill: true,
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.25,
+        }]
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => {
+            const s = snaps[c.dataIndex];
+            const sign = (s.pnl_pct || 0) >= 0 ? '+' : '';
+            return ` $${fmt(s.total_value)} · P&L ${sign}${fmt(s.pnl_pct)}%`;
+          } } }
+        },
+        scales: {
+          x: { ticks: { color: 'rgba(255,255,255,0.3)', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { ticks: { color: 'rgba(255,255,255,0.3)', callback: v => '$' + Number(v).toLocaleString('es-AR') }, grid: { color: 'rgba(255,255,255,0.05)' } }
+        }
+      }
+    });
+  } catch(e) {
+    wrap.style.display = 'none';
+    msg.style.display = 'block';
+    msg.textContent = '⚠️ No se pudo cargar el historial del portfolio.';
+  }
+}
+
+// ── Hoy: extras (smart sin ver, alertas disparadas, noticias) ─────────────────
+function loadHoyExtras() {
+  loadEvolution();
+  loadHoySmart();
+  loadHoyTriggered();
+  loadHoyNews();
+}
+
+let _hoyUnseen = [];
+
+async function loadHoySmart() {
+  try {
+    const resp = await fetch('/api/smart-alerts/unseen');
+    const unseen = await resp.json();
+    _hoyUnseen = unseen;
+    const sec = document.getElementById('hoy-smart-section');
+    if (!unseen.length) { sec.style.display = 'none'; return; }
+    document.getElementById('hoy-smart-list').innerHTML = unseen.map(a => smartCard(a, true)).join('');
+    sec.style.display = 'block';
+  } catch(e) {}
+}
+
+async function markHoySmartSeen() {
+  await mark_seen_api(_hoyUnseen.map(a => a.id));
+  _hoyUnseen = [];
+  document.getElementById('hoy-smart-section').style.display = 'none';
+  showToast('✅ Oportunidades marcadas como vistas');
+}
+
+async function loadHoyTriggered() {
+  try {
+    const resp = await fetch('/api/alerts');
+    const alerts = await resp.json();
+    const trig = alerts.filter(a => a.triggered).slice(-5).reverse();
+    const sec = document.getElementById('hoy-alerts-section');
+    if (!trig.length) { sec.style.display = 'none'; return; }
+    document.getElementById('hoy-alerts-list').innerHTML = trig.map(a => `
+      <div class="alert-item">
+        <div>
+          <strong>${a.symbol}</strong>
+          <span class="tag tag-yellow" style="margin-left:8px">✓ Disparada a ${fmtMoney(a.triggered_price)}</span>
+          <span style="color:var(--text-muted);font-size:12px;margin-left:8px">
+            ${a.condition === 'above' ? '▲ objetivo ≥' : '▼ objetivo ≤'} ${fmtMoney(a.target_price)}
+          </span>
+          ${a.note ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">${a.note}</div>` : ''}
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="openAssetDetail('${a.symbol}')">Ver activo</button>
+      </div>`).join('');
+    sec.style.display = 'block';
+  } catch(e) {}
+}
+
+async function loadHoyNews() {
+  const el = document.getElementById('hoy-news-list');
+  try {
+    if (newsTotal() === 0) {
+      const resp = await fetch('/api/news?enrich=false&max=80');
+      _newsData = await resp.json();
+      renderCurrentNews();
+    }
+    const list = portfolioNewsList().slice(0, 5);
+    if (!list.length) {
+      el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">Ninguna noticia reciente menciona activos de tu portfolio.</div>';
+      return;
+    }
+    el.innerHTML = list.map(n => `
+      <div style="padding:10px 4px;border-bottom:1px solid var(--border-soft)">
+        <a href="${n.url}" target="_blank" rel="noopener" style="color:rgba(255,255,255,0.82);text-decoration:none;font-weight:500;font-size:13.5px;line-height:1.45">${n.title}</a>
+        <div class="news-meta" style="margin:4px 0 0">${n.source} · ${n.published}${n.symbols && n.symbols.length ? ' · ' + n.symbols.map(s => '$' + s).join(' ') : ''}</div>
+      </div>`).join('');
+  } catch(e) {
+    el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">⚠️ No se pudieron cargar las noticias.</div>';
+  }
+}
+
 // ── Upload CSV ────────────────────────────────────────────────────────────────
 async function uploadCSV(event) {
   const file = event.target.files[0];
@@ -1049,7 +1444,10 @@ async function uploadCSV(event) {
     const data = await resp.json();
     portfolioData = data;
     renderPortfolio(data);
-    if (!data.error) showToast('✅ CSV cargado correctamente');
+    if (!data.error) {
+      showToast('✅ CSV cargado correctamente');
+      navigate('hoy');
+    }
   } catch(e) { showToast('❌ Error cargando CSV'); }
 }
 
@@ -1092,19 +1490,253 @@ async function submitManual() {
   renderPortfolio(data);
   closeManualModal();
   showToast('✅ Posiciones cargadas');
+  navigate('hoy');
 }
 
-// ── Compare ───────────────────────────────────────────────────────────────────
+// ── Explorar: vista de detalle del activo ─────────────────────────────────────
+let currentDetailSymbol = null;
+let currentDetailPrice = null;
+
+function searchAsset() {
+  const sym = document.getElementById('explore-input').value.trim().toUpperCase();
+  if (!sym) { showToast('Ingresá un símbolo'); return; }
+  openAssetDetail(sym);
+}
+
+async function openAssetDetail(symbol, opts = {}) {
+  symbol = (symbol || '').trim().toUpperCase();
+  if (!symbol) return;
+
+  if (!document.getElementById('page-explorar').classList.contains('active')) navigate('explorar');
+
+  currentDetailSymbol = symbol;
+  currentDetailPrice = null;
+
+  const detail = document.getElementById('asset-detail');
+  detail.style.display = 'block';
+  document.getElementById('detail-title').textContent = symbol;
+  document.getElementById('detail-name').textContent = '';
+  document.getElementById('detail-metrics').innerHTML =
+    '<div class="loading-overlay" style="grid-column:1/-1;padding:20px"><div class="spinner"></div> Cargando datos...</div>';
+  document.getElementById('detail-analysis').innerHTML = '';
+  document.getElementById('detail-analysis-loading').style.display = 'none';
+  document.getElementById('detail-alert-form').style.display = 'none';
+  detail.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  loadDetailChart();
+
+  try {
+    const resp = await fetch(`/api/quote/${symbol}`);
+    const q = await resp.json();
+    if (q.error) {
+      document.getElementById('detail-metrics').innerHTML =
+        `<div style="grid-column:1/-1;color:var(--yellow);padding:16px;text-align:center">⚠️ ${q.error}</div>`;
+    } else {
+      currentDetailPrice = q.price;
+      document.getElementById('detail-name').textContent =
+        `${q.name || ''}${q.sector ? ' · ' + q.sector : ''}${q.industry ? ' · ' + q.industry : ''}`;
+      const mc = (label, val, sub = '') =>
+        `<div class="card" style="padding:12px 14px"><div class="card-title" style="margin-bottom:6px">${label}</div>
+         <div class="metric-value" style="font-size:17px;margin-bottom:2px">${val}</div>
+         ${sub ? `<div class="metric-sub" style="font-size:11px">${sub}</div>` : ''}</div>`;
+      document.getElementById('detail-metrics').innerHTML = [
+        mc('Precio', fmtMoney(q.price), fmtPct(q.change_pct) + ' hoy'),
+        mc('Market Cap', fmtBig(q.market_cap)),
+        mc('P/E (trailing / fwd)', `${q.pe_ratio ? fmt(q.pe_ratio, 1) : '—'} / ${q.forward_pe ? fmt(q.forward_pe, 1) : '—'}`),
+        mc('EPS', q.eps != null ? fmt(q.eps) : '—'),
+        mc('Rango 52 semanas', `${q['52w_low'] != null ? fmt(q['52w_low']) : '—'} – ${q['52w_high'] != null ? fmt(q['52w_high']) : '—'}`),
+        mc('Dividend Yield', q.dividend_yield ? fmt(q.dividend_yield * 100) + '%' : '—'),
+        mc('Volumen promedio', q.avg_volume ? Number(q.avg_volume).toLocaleString('es-AR') : '—'),
+        mc('Exchange', q.exchange || '—', q.currency || ''),
+      ].join('');
+    }
+  } catch(e) {
+    document.getElementById('detail-metrics').innerHTML =
+      '<div style="grid-column:1/-1;color:var(--red);padding:16px;text-align:center">❌ Error obteniendo datos</div>';
+  }
+
+  if (opts.analyze) detailAnalyze();
+}
+
+function closeAssetDetail() {
+  document.getElementById('asset-detail').style.display = 'none';
+  currentDetailSymbol = null;
+  currentDetailPrice = null;
+}
+
+async function loadDetailChart() {
+  if (!currentDetailSymbol) return;
+  const symbol = currentDetailSymbol;
+  const period = document.getElementById('detail-period').value;
+  try {
+    const resp = await fetch(`/api/history/${symbol}?period=${period}`);
+    const h = await resp.json();
+    if (h.error || symbol !== currentDetailSymbol) return;
+
+    const ctx = document.getElementById('chart-detail').getContext('2d');
+    if (detailChart) detailChart.destroy();
+    const up = h.close.length > 1 && h.close[h.close.length - 1] >= h.close[0];
+    detailChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: h.dates,
+        datasets: [{
+          label: symbol,
+          data: h.close,
+          borderColor: up ? '#4ade80' : '#f87171',
+          backgroundColor: up ? 'rgba(74,222,128,0.06)' : 'rgba(248,113,113,0.06)',
+          fill: true,
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.2,
+        }]
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: 'rgba(255,255,255,0.3)', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { ticks: { color: 'rgba(255,255,255,0.3)', callback: v => '$' + v }, grid: { color: 'rgba(255,255,255,0.05)' } }
+        }
+      }
+    });
+  } catch(e) {}
+}
+
+// Atajo usado desde posiciones, radar y smart alerts
+function quickAnalyze(symbol) {
+  openAssetDetail(symbol, { analyze: true });
+}
+
+async function detailAnalyze() {
+  if (!currentDetailSymbol) return;
+  document.getElementById('detail-analysis-loading').style.display = 'flex';
+  document.getElementById('detail-analysis').innerHTML = '';
+  try {
+    const resp = await fetch(`/api/analyze/${currentDetailSymbol}`);
+    const data = await resp.json();
+    document.getElementById('detail-analysis-loading').style.display = 'none';
+    renderAnalysis(data, 'detail-analysis');
+  } catch(e) {
+    document.getElementById('detail-analysis-loading').style.display = 'none';
+    showToast('❌ Error en análisis');
+  }
+}
+
+function renderAnalysis(data, targetId) {
+  const target = document.getElementById(targetId || 'detail-analysis');
+  if (data.error) {
+    target.innerHTML =
+      `<div class="analysis-card" style="border-color:var(--red);color:var(--red)">⚠️ ${data.error}</div>`;
+    return;
+  }
+
+  const rec = data.recommendation || 'N/A';
+  const conv = data.conviction || '';
+  const strengths = (data.strengths || []).map(s => `<li>${s}</li>`).join('');
+  const risks = (data.risks || []).map(r => `<li>${r}</li>`).join('');
+
+  target.innerHTML = `
+    <div class="grid-2" style="margin-bottom:0">
+      <div class="analysis-card">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <span class="recommendation-badge rec-${rec}">${rec}</span>
+          <span style="color:var(--text-muted);font-size:12px">Convicción: ${conv}</span>
+          <span style="margin-left:auto;color:var(--text-muted);font-size:12px">${data.time_horizon || ''}</span>
+        </div>
+        <p style="line-height:1.6;margin-bottom:16px">${data.summary || ''}</p>
+        ${data.target_price_range ? `<div style="color:var(--text-muted);font-size:12px">Precio objetivo: ${fmtMoney(data.target_price_range.min)} – ${fmtMoney(data.target_price_range.max)}</div>` : ''}
+      </div>
+      <div class="analysis-card">
+        <div style="margin-bottom:12px"><strong>📊 Señal técnica</strong><p style="color:var(--text-muted);margin-top:6px;line-height:1.5">${data.technical_signal || '—'}</p></div>
+        <div><strong>📈 Análisis fundamental</strong><p style="color:var(--text-muted);margin-top:6px;line-height:1.5">${data.fundamental_signal || '—'}</p></div>
+      </div>
+      <div class="analysis-card">
+        <strong style="color:var(--green)">✅ Fortalezas</strong>
+        <ul style="padding-left:18px;margin-top:8px;line-height:2;color:var(--text-muted)">${strengths}</ul>
+      </div>
+      <div class="analysis-card">
+        <strong style="color:var(--red)">⚠️ Riesgos</strong>
+        <ul style="padding-left:18px;margin-top:8px;line-height:2;color:var(--text-muted)">${risks}</ul>
+      </div>
+    </div>
+    ${data.portfolio_fit ? `<div class="analysis-card" style="margin-top:16px"><strong>🎯 Fit con tu portfolio</strong><p style="color:var(--text-muted);margin-top:8px;line-height:1.6">${data.portfolio_fit}</p></div>` : ''}
+  `;
+}
+
+// ── Explorar: alerta inline desde la vista de detalle ─────────────────────────
+function toggleDetailAlert() {
+  const f = document.getElementById('detail-alert-form');
+  const visible = f.style.display !== 'none' && f.style.display !== '';
+  if (visible) { f.style.display = 'none'; return; }
+  f.style.display = 'block';
+  document.getElementById('d-alert-condition').value = 'below';
+  document.getElementById('d-alert-price').value = currentDetailPrice ? (currentDetailPrice * 0.9).toFixed(2) : '';
+  document.getElementById('d-alert-note').value = '';
+}
+
+async function createDetailAlert() {
+  if (!currentDetailSymbol) return;
+  const condition = document.getElementById('d-alert-condition').value;
+  const price = parseFloat(document.getElementById('d-alert-price').value);
+  const note = document.getElementById('d-alert-note').value;
+  if (!price) { showToast('⚠️ Completá el precio objetivo'); return; }
+
+  const resp = await fetch('/api/alerts', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ symbol: currentDetailSymbol, condition, target_price: price, note })
+  });
+  if (resp.ok) {
+    showToast(`✅ Alerta creada para ${currentDetailSymbol}`);
+    document.getElementById('detail-alert-form').style.display = 'none';
+  } else {
+    showToast('❌ No se pudo crear la alerta');
+  }
+}
+
+// ── Explorar: bandeja de comparación ──────────────────────────────────────────
+let compareSymbols = [];
+
+function addToCompare(symbol) {
+  const s = (symbol || '').trim().toUpperCase();
+  if (!s) return;
+  if (compareSymbols.includes(s)) { showToast(`${s} ya está en la bandeja`); return; }
+  if (compareSymbols.length >= 6) { showToast('⚠️ Máximo 6 símbolos para comparar'); return; }
+  compareSymbols.push(s);
+  renderCompareChips();
+  showToast(`📊 ${s} agregado a la comparación`);
+}
+
+function removeFromCompare(symbol) {
+  compareSymbols = compareSymbols.filter(s => s !== symbol);
+  renderCompareChips();
+}
+
+function addCompareFromInput() {
+  const input = document.getElementById('compare-add');
+  input.value.split(',').map(s => s.trim()).filter(Boolean).forEach(addToCompare);
+  input.value = '';
+}
+
+function renderCompareChips() {
+  const el = document.getElementById('compare-chips');
+  if (!compareSymbols.length) {
+    el.innerHTML = '<span style="color:var(--text-faint);font-size:12px">Agregá símbolos desde la vista de detalle o escribilos acá abajo.</span>';
+    return;
+  }
+  el.innerHTML = compareSymbols.map(s =>
+    `<span class="chip">${s}<button onclick="removeFromCompare('${s}')" title="Quitar">✕</button></span>`).join('');
+}
+
 async function runCompare() {
-  const symbols = document.getElementById('compare-input').value;
-  const period = document.getElementById('compare-period').value;
-  if (!symbols.trim()) { showToast('Ingresá al menos un símbolo'); return; }
+  if (compareSymbols.length < 2) { showToast('⚠️ Agregá al menos 2 símbolos a la bandeja'); return; }
 
   document.getElementById('compare-results').style.display = 'none';
   document.getElementById('compare-loading').style.display = 'flex';
 
   try {
-    const resp = await fetch(`/api/compare?symbols=${encodeURIComponent(symbols)}&period=${period}`);
+    const resp = await fetch(`/api/compare?symbols=${encodeURIComponent(compareSymbols.join(','))}`);
     const data = await resp.json();
     document.getElementById('compare-loading').style.display = 'none';
     renderComparison(data);
@@ -1168,104 +1800,19 @@ function renderComparison(data) {
       <tbody>${rows}</tbody>
     </table>`;
 
-  document.getElementById('compare-results').style.display = 'block';
+  const results = document.getElementById('compare-results');
+  results.style.display = 'block';
+  results.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// ── AI Analysis ───────────────────────────────────────────────────────────────
-async function runAnalysis(sym) {
-  const symbol = sym || document.getElementById('analyze-input').value.trim().toUpperCase();
-  if (!symbol) { showToast('Ingresá un símbolo'); return; }
-
-  document.getElementById('analyze-loading').style.display = 'flex';
-  document.getElementById('analyze-results').innerHTML = '';
-
-  try {
-    const resp = await fetch(`/api/analyze/${symbol}`);
-    const data = await resp.json();
-    document.getElementById('analyze-loading').style.display = 'none';
-    renderAnalysis(data);
-  } catch(e) {
-    document.getElementById('analyze-loading').style.display = 'none';
-    showToast('❌ Error en análisis');
-  }
-}
-
-function quickAnalyze(symbol) {
-  navigate('analyze');
-  document.querySelectorAll('.nav-item').forEach((n, i) => {
-    if (i === 2) n.classList.add('active'); else n.classList.remove('active');
+// ── Alertas: tabs de sección (mis / smart / track) ────────────────────────────
+function switchAlertsSection(sec) {
+  ['mis', 'smart', 'track'].forEach(s => {
+    document.getElementById(`alerts-sec-${s}`).style.display = s === sec ? 'block' : 'none';
+    document.getElementById(`atab-${s}`).className = s === sec ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
   });
-  document.getElementById('analyze-input').value = symbol;
-  runAnalysis(symbol);
-}
-
-function renderAnalysis(data) {
-  if (data.error) {
-    document.getElementById('analyze-results').innerHTML =
-      `<div class="analysis-card" style="border-color:var(--red);color:var(--red)">⚠️ ${data.error}</div>`;
-    return;
-  }
-
-  const rec = data.recommendation || 'N/A';
-  const conv = data.conviction || '';
-  const strengths = (data.strengths || []).map(s => `<li>${s}</li>`).join('');
-  const risks = (data.risks || []).map(r => `<li>${r}</li>`).join('');
-  const q = (data.data && data.data.quote) || {};
-
-  document.getElementById('analyze-results').innerHTML = `
-    <div class="grid-2">
-      <div class="analysis-card">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-          <span class="recommendation-badge rec-${rec}">${rec}</span>
-          <span style="color:var(--text-muted);font-size:12px">Convicción: ${conv}</span>
-          <span style="margin-left:auto;color:var(--text-muted);font-size:12px">${data.time_horizon || ''}</span>
-        </div>
-        <p style="line-height:1.6;margin-bottom:16px">${data.summary || ''}</p>
-        ${data.target_price_range ? `<div style="color:var(--text-muted);font-size:12px">Precio objetivo: ${fmtMoney(data.target_price_range.min)} – ${fmtMoney(data.target_price_range.max)}</div>` : ''}
-      </div>
-      <div class="analysis-card">
-        <div style="margin-bottom:12px"><strong>📊 Señal técnica</strong><p style="color:var(--text-muted);margin-top:6px;line-height:1.5">${data.technical_signal || '—'}</p></div>
-        <div><strong>📈 Análisis fundamental</strong><p style="color:var(--text-muted);margin-top:6px;line-height:1.5">${data.fundamental_signal || '—'}</p></div>
-      </div>
-      <div class="analysis-card">
-        <strong style="color:var(--green)">✅ Fortalezas</strong>
-        <ul style="padding-left:18px;margin-top:8px;line-height:2;color:var(--text-muted)">${strengths}</ul>
-      </div>
-      <div class="analysis-card">
-        <strong style="color:var(--red)">⚠️ Riesgos</strong>
-        <ul style="padding-left:18px;margin-top:8px;line-height:2;color:var(--text-muted)">${risks}</ul>
-      </div>
-    </div>
-    ${data.portfolio_fit ? `<div class="analysis-card"><strong>🎯 Fit con tu portfolio</strong><p style="color:var(--text-muted);margin-top:8px;line-height:1.6">${data.portfolio_fit}</p></div>` : ''}
-  `;
-}
-
-// ── Chat ──────────────────────────────────────────────────────────────────────
-async function sendChat() {
-  const input = document.getElementById('chat-input');
-  const question = input.value.trim();
-  if (!question) return;
-
-  const messages = document.getElementById('chat-messages');
-  messages.innerHTML += `<div class="chat-message chat-user"><div class="chat-bubble">${question}</div></div>`;
-  messages.innerHTML += `<div id="chat-loading" class="chat-message chat-ai"><div class="chat-bubble"><div class="spinner"></div></div></div>`;
-  messages.scrollTop = messages.scrollHeight;
-  input.value = '';
-
-  try {
-    const resp = await fetch('/api/chat', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ question })
-    });
-    const data = await resp.json();
-    document.getElementById('chat-loading').remove();
-    const answer = data.answer || data.error || 'Sin respuesta';
-    messages.innerHTML += `<div class="chat-message chat-ai"><div class="chat-bubble">${answer.replace(/\n/g, '<br>')}</div></div>`;
-    messages.scrollTop = messages.scrollHeight;
-  } catch(e) {
-    document.getElementById('chat-loading').remove();
-    messages.innerHTML += `<div class="chat-message chat-ai"><div class="chat-bubble" style="color:var(--red)">❌ Error de conexión</div></div>`;
-  }
+  if (sec === 'track' && !trackLoaded) loadTrackRecord();
+  if (sec === 'smart') loadSmartHistory();
 }
 
 // ── Alerts ────────────────────────────────────────────────────────────────────
@@ -1336,16 +1883,15 @@ async function checkAlerts() {
 }
 
 function setAlertFromPosition(symbol, price) {
-  navigate('alerts');
-  document.querySelectorAll('.nav-item').forEach((n, i) => {
-    if (i === 4) n.classList.add('active'); else n.classList.remove('active');
-  });
+  navigate('alertas');
+  switchAlertsSection('mis');
+  switchAlertTab('price');
   document.getElementById('alert-symbol').value = symbol;
   document.getElementById('alert-price').value = price ? (price * 0.9).toFixed(2) : '';
   document.getElementById('alert-condition').value = 'below';
 }
 
-// ── Alert Tabs ────────────────────────────────────────────────────────────────
+// ── Alert Tabs (precio fijo / % caída) ────────────────────────────────────────
 function switchAlertTab(tab) {
   document.getElementById('alert-tab-price').style.display = tab === 'price' ? 'block' : 'none';
   document.getElementById('alert-tab-pct').style.display = tab === 'pct' ? 'block' : 'none';
@@ -1409,6 +1955,99 @@ async function addPctAlert() {
     document.getElementById('pct-preview').style.display = 'none';
     loadAlerts();
   }
+}
+
+// ── Track record de smart alerts ──────────────────────────────────────────────
+let trackLoaded = false;
+
+async function loadTrackRecord(force = false) {
+  const wrap = document.getElementById('track-content');
+  wrap.innerHTML = '<div class="loading-overlay"><div class="spinner"></div> Calculando track record...</div>';
+  try {
+    const resp = await fetch(`/api/smart-alerts/track-record${force ? '?refresh=true' : ''}`);
+    const data = await resp.json();
+    trackLoaded = true;
+    renderTrackRecord(data);
+  } catch(e) {
+    wrap.innerHTML = '<div class="loading-overlay" style="color:var(--red)">❌ Error cargando el track record</div>';
+  }
+}
+
+function renderTrackRecord(data) {
+  const wrap = document.getElementById('track-content');
+  const s = data.summary || {};
+  const alerts = data.alerts || [];
+
+  if (!alerts.length) {
+    wrap.innerHTML = `
+      <div class="card" style="text-align:center;padding:40px 20px;color:var(--text-muted)">
+        <div style="font-size:28px;margin-bottom:10px">📈</div>
+        <div style="line-height:1.6">Todavía no hay señales inteligentes en el historial.<br>
+        Cuando el sistema detecte oportunidades, acá vas a ver cómo les fue contra SPY.</div>
+      </div>`;
+    return;
+  }
+
+  const wr = s.win_rate_vs_spy;
+  const wrColor = wr == null ? 'var(--text-muted)' : wr >= 50 ? 'var(--green)' : 'var(--red)';
+
+  const summaryCards = `
+    <div class="grid-4">
+      <div class="card"><div class="card-title">Señales</div>
+        <div class="metric-value">${s.total ?? alerts.length}</div>
+        <div class="metric-sub">detectadas</div></div>
+      <div class="card"><div class="card-title">Win rate vs SPY</div>
+        <div class="metric-value" style="color:${wrColor}">${wr != null ? fmt(wr, 1) + '%' : '—'}</div>
+        <div class="metric-sub">señales con ≥1 día que le ganan a SPY</div></div>
+      <div class="card"><div class="card-title">Retorno promedio</div>
+        <div class="metric-value">${s.avg_return != null ? fmtPct(s.avg_return) : '—'}</div>
+        <div class="metric-sub">desde la detección</div></div>
+      <div class="card"><div class="card-title">Alpha promedio</div>
+        <div class="metric-value">${s.avg_alpha != null ? fmtPct(s.avg_alpha) : '—'}</div>
+        <div class="metric-sub">retorno − SPY mismo período</div></div>
+    </div>
+    <div class="grid-2">
+      <div class="card"><div class="card-title" style="color:var(--green)">🏆 Mejor señal</div>
+        ${s.best ? `<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+          <strong style="font-family:var(--mono);font-size:16px">${s.best.symbol}</strong>
+          <span class="metric-value" style="font-size:18px;margin:0">${fmtPct(s.best.return_pct)}</span>
+          <span class="metric-sub">alpha ${fmtPct(s.best.alpha)} · ${s.best.detected_at ? new Date(s.best.detected_at).toLocaleDateString('es-AR') : ''}</span>
+        </div>` : '<div class="metric-sub">—</div>'}</div>
+      <div class="card"><div class="card-title" style="color:var(--red)">📉 Peor señal</div>
+        ${s.worst ? `<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+          <strong style="font-family:var(--mono);font-size:16px">${s.worst.symbol}</strong>
+          <span class="metric-value" style="font-size:18px;margin:0">${fmtPct(s.worst.return_pct)}</span>
+          <span class="metric-sub">alpha ${fmtPct(s.worst.alpha)} · ${s.worst.detected_at ? new Date(s.worst.detected_at).toLocaleDateString('es-AR') : ''}</span>
+        </div>` : '<div class="metric-sub">—</div>'}</div>
+    </div>`;
+
+  const rows = alerts.map(a => `
+    <tr onclick="openAssetDetail('${a.symbol}')" style="cursor:pointer" title="Ver detalle de ${a.symbol}">
+      <td><strong>${a.symbol}</strong></td>
+      <td>${a.detected_at ? new Date(a.detected_at).toLocaleDateString('es-AR') : '—'}</td>
+      <td>${a.days_elapsed != null ? a.days_elapsed + 'd' : '—'}</td>
+      <td>${fmtMoney(a.price_at_detection)} → ${fmtMoney(a.current_price)}</td>
+      <td>${fmtPct(a.return_pct)}</td>
+      <td>${fmtPct(a.spy_return_pct)}</td>
+      <td>${a.alpha != null
+        ? `<strong class="${a.alpha >= 0 ? 'positive' : 'negative'}">${a.alpha >= 0 ? '+' : ''}${fmt(a.alpha)}%</strong>`
+        : '—'}</td>
+    </tr>`).join('');
+
+  wrap.innerHTML = `
+    ${summaryCards}
+    <div class="card">
+      <div class="card-title">Detalle por señal</div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>Activo</th><th>Detectada</th><th>Días</th>
+            <th>Precio detección → actual</th><th>Retorno</th><th>SPY mismo período</th><th>Alpha</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
 }
 
 // ── Radar ─────────────────────────────────────────────────────────────────────
@@ -1477,7 +2116,7 @@ function renderRadarTab(tab) {
 function buildTable(list, showSector, highlight) {
   if (!list || !list.length) return '<div class="loading-overlay">Sin datos</div>';
   const rows = list.map(r => fullRow(r, showSector, highlight)).join('');
-  return `<table>
+  return `<div style="overflow-x:auto"><table>
     <thead><tr>
       <th>Activo</th>
       ${showSector ? '<th>Sector</th>' : ''}
@@ -1489,7 +2128,7 @@ function buildTable(list, showSector, highlight) {
       <th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
-  </table>`;
+  </table></div>`;
 }
 
 function scorePill(score, type) {
@@ -1505,6 +2144,10 @@ function scorePill(score, type) {
     </div>
     <span style="color:${color};font-weight:700;font-size:12px;min-width:24px">${score}</span>
   </div>`;
+}
+
+function scoreColor(score) {
+  return score >= 70 ? 'var(--green)' : score >= 40 ? 'var(--yellow)' : 'var(--text-muted)';
 }
 
 function riskBadge(label) {
@@ -1533,7 +2176,7 @@ function fullRow(r, showSector, highlight) {
   const highlight_entry = highlight === 'entry' ? 'background:rgba(124,131,253,0.06);' : '';
   const highlight_growth = highlight === 'growth' ? 'background:rgba(167,139,250,0.06);' : '';
 
-  return `<tr>
+  return `<tr onclick="openAssetDetail('${r.symbol}')" style="cursor:pointer" title="Ver detalle de ${r.symbol}">
     <td><strong>${r.symbol}</strong><div style="font-size:11px;color:var(--text-muted);max-width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.name || ''}</div></td>
     ${showSector ? `<td><span class="tag tag-blue" style="font-size:10px">${r.sector_label || '—'}</span></td>` : ''}
     <td style="${highlight_entry}">${scorePill(r.entry_score, 'entry')}</td>
@@ -1552,8 +2195,8 @@ function fullRow(r, showSector, highlight) {
     <td>${revG}</td>
     <td style="font-size:12px">${upside}</td>
     <td style="white-space:nowrap">
-      <button class="btn btn-outline btn-sm" onclick="quickAnalyze('${r.symbol}')" title="Analizar con IA">🤖</button>
-      <button class="btn btn-outline btn-sm" onclick="radarSetAlert('${r.symbol}', ${r.current_price || 0})" title="Alerta">🔔</button>
+      <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();quickAnalyze('${r.symbol}')" title="Analizar con IA">🤖</button>
+      <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();radarSetAlert('${r.symbol}', ${r.current_price || 0})" title="Alerta">🔔</button>
     </td>
   </tr>`;
 }
@@ -1571,10 +2214,8 @@ function renderSectors() {
 }
 
 function radarSetAlert(symbol, price) {
-  navigate('alerts');
-  document.querySelectorAll('.nav-item').forEach((n,i) => {
-    if (i === 4) n.classList.add('active'); else n.classList.remove('active');
-  });
+  navigate('alertas');
+  switchAlertsSection('mis');
   switchAlertTab('pct');
   document.getElementById('pct-symbol').value = symbol;
   document.getElementById('pct-ref-price').value = price ? price.toFixed(2) : '';
@@ -1583,9 +2224,6 @@ function radarSetAlert(symbol, price) {
 }
 
 // ── Smart Alerts ──────────────────────────────────────────────────────────────
-let smartInterval = null;
-let smartIntervalMs = 30 * 60 * 1000;
-
 async function initSmartAlerts() {
   // Pedir permiso de notificaciones
   if ('Notification' in window && Notification.permission === 'default') {
@@ -1601,38 +2239,40 @@ async function initSmartAlerts() {
     document.getElementById('cfg-entry-val').textContent = cfg.min_entry_score || 55;
     document.getElementById('cfg-interval').value = cfg.interval_minutes || 30;
     document.getElementById('cfg-extra').value = (cfg.extra_symbols || []).join(', ');
-    smartIntervalMs = (cfg.interval_minutes || 30) * 60 * 1000;
   } catch(e) {}
 
-  // Polling ligero cada minuto para actualizar badge
-  setInterval(pollUnseenBadge, 60 * 1000);
+  // Las alertas se chequean server-side (scheduler). El frontend solo hace un
+  // polling ligero cada 60 s para el badge y las alertas de precio disparadas.
+  setInterval(pollAlertsLight, 60 * 1000);
+  pollAlertsLight();
+}
+
+function pollAlertsLight() {
   pollUnseenBadge();
-
-  // Chequeo completo periódico
-  scheduleSmartCheck();
+  pollTriggeredPriceAlerts();
 }
 
-function scheduleSmartCheck() {
-  if (smartInterval) clearInterval(smartInterval);
-  smartInterval = setInterval(() => {
-    // Solo escanear si la pestaña está visible
-    if (!document.hidden) silentSmartCheck();
-  }, smartIntervalMs);
-}
-
-async function silentSmartCheck() {
+async function pollTriggeredPriceAlerts() {
   try {
-    const resp = await fetch('/api/smart-alerts/check');
-    const data = await resp.json();
-    if (data.triggered && data.triggered.length > 0) {
-      data.triggered.forEach(a => sendBrowserNotification(a));
-      pollUnseenBadge();
-      // Si el usuario está en la página de smart alerts, recargar historial
-      if (document.getElementById('page-smart').classList.contains('active')) {
-        loadSmartHistory();
-      }
+    const resp = await fetch('/api/alerts/check');
+    const triggered = await resp.json();
+    if (triggered && triggered.length) {
+      triggered.forEach(a => notifyPriceAlert(a));
+      showToast(`🔔 ${triggered.length} alerta(s) de precio disparada(s)!`, 5000);
+      if (document.getElementById('page-hoy').classList.contains('active')) loadHoyTriggered();
+      if (document.getElementById('page-alertas').classList.contains('active')) loadAlerts();
     }
   } catch(e) {}
+}
+
+function notifyPriceAlert(a) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const n = new Notification(`🔔 ${a.symbol} — Alerta de precio`, {
+    body: `${a.condition === 'above' ? 'Subió a' : 'Bajó a'} $${fmt(a.triggered_price)} (objetivo: $${fmt(a.target_price)})${a.note ? '\n' + a.note : ''}`,
+    icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🔔</text></svg>',
+    tag: `alert-${a.id}`,
+  });
+  n.onclick = () => { window.focus(); navigate('alertas'); };
 }
 
 async function runSmartCheck() {
@@ -1727,7 +2367,7 @@ function sendBrowserNotification(a) {
     icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">📈</text></svg>',
     tag: `smart-${a.symbol}`,
   });
-  n.onclick = () => { window.focus(); navigate('smart'); };
+  n.onclick = () => { window.focus(); navigate('alertas'); switchAlertsSection('smart'); };
 }
 
 async function pollUnseenBadge() {
@@ -1767,26 +2407,35 @@ async function saveSmartConfig() {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(cfg)
   });
-  smartIntervalMs = cfg.interval_minutes * 60 * 1000;
-  scheduleSmartCheck();
   showToast('✅ Configuración guardada');
 }
 
 // ── Noticias ──────────────────────────────────────────────────────────────────
 
 const NEWS_SECTIONS = ['TECH_IA', 'IA_TECNICA', 'STARTUPS', 'VOCES', 'MERCADOS'];
+const NEWS_TABS = ['PORTFOLIO', ...NEWS_SECTIONS];   // PORTFOLIO agrega las in_portfolio de todas
 const NEWS_PAGE = 40;  // cuántas se muestran por sección antes de "Cargar más"
 let _newsData = { TECH_IA: [], IA_TECNICA: [], STARTUPS: [], VOCES: [], MERCADOS: [] };
-let _newsTab = 'TECH_IA';
+let _newsTab = 'PORTFOLIO';
 let _newsShown = {};   // por sección: cuántas se están mostrando
 
 function newsTotal() {
   return NEWS_SECTIONS.reduce((s, sec) => s + (_newsData[sec] || []).length, 0);
 }
 
+function portfolioNewsList() {
+  const seen = new Set();
+  const out = [];
+  NEWS_SECTIONS.forEach(sec => (_newsData[sec] || []).forEach(n => {
+    if (n.in_portfolio && !seen.has(n.url)) { seen.add(n.url); out.push(n); }
+  }));
+  out.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
+  return out;
+}
+
 function switchNewsTab(tab) {
   _newsTab = tab;
-  NEWS_SECTIONS.forEach(s => {
+  NEWS_TABS.forEach(s => {
     document.getElementById('news-' + s).style.display = s === tab ? 'block' : 'none';
     document.getElementById('ntab-' + s).classList.toggle('active', s === tab);
   });
@@ -1823,13 +2472,11 @@ function newsCardHtml(n) {
 function renderNewsSection(section) {
   const el = document.getElementById('news-' + section);
   if (!el) return;
-  const portOnly = document.getElementById('news-portfolio-only')?.checked;
-  let list = _newsData[section] || [];
-  if (portOnly) list = list.filter(n => n.in_portfolio);
+  const list = section === 'PORTFOLIO' ? portfolioNewsList() : (_newsData[section] || []);
 
   if (!list.length) {
-    const msg = portOnly
-      ? 'Ninguna noticia menciona activos de tu portfolio en esta sección'
+    const msg = section === 'PORTFOLIO'
+      ? 'Ninguna noticia reciente menciona activos de tu portfolio'
       : 'No se encontraron noticias';
     el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-muted)">${msg}</div>`;
     return;
@@ -1853,7 +2500,7 @@ function showMoreNews(section) {
 }
 
 function renderCurrentNews() {
-  NEWS_SECTIONS.forEach(renderNewsSection);
+  NEWS_TABS.forEach(renderNewsSection);
 }
 
 async function loadNews(withAI = false, forceRefresh = false) {
@@ -1861,7 +2508,7 @@ async function loadNews(withAI = false, forceRefresh = false) {
   status.textContent = withAI ? '⏳ Recolectando y analizando con IA...' : '⏳ Recolectando noticias...';
   _newsShown = {};  // reset paginación
 
-  NEWS_SECTIONS.forEach(s => {
+  NEWS_TABS.forEach(s => {
     const el = document.getElementById('news-' + s);
     if (el) el.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-muted)">⏳ Cargando...</div>';
   });
@@ -1891,8 +2538,105 @@ async function loadNews(withAI = false, forceRefresh = false) {
   }
 }
 
+// ── Ajustes: estado del proveedor IA ──────────────────────────────────────────
+async function loadAIStatus() {
+  const el = document.getElementById('ai-status');
+  el.innerHTML = '<div class="loading-overlay" style="padding:12px"><div class="spinner"></div> Consultando estado...</div>';
+  try {
+    const resp = await fetch('/api/ai/status');
+    const st = await resp.json();
+    const dot = ok => `<span style="color:${ok ? 'var(--green)' : 'var(--red)'}">●</span>`;
+    const groq = st.groq || {};
+    const anth = st.anthropic || {};
+    el.innerHTML = `
+      <div style="margin-bottom:12px;font-size:13px">Proveedor activo:
+        <strong style="color:var(--accent);font-family:var(--mono)">${st.active_provider || '—'}</strong></div>
+      <div style="line-height:1.9;font-size:13px">
+        <div>${dot(groq.configured)} <strong>Groq</strong> — ${groq.configured ? 'configurado' : 'no configurado'}${groq.connected != null ? (groq.connected ? ' · conectado ✓' : ' · sin conexión ✗') : ''}</div>
+        ${groq.model_analysis ? `<div style="font-size:11px;color:var(--text-muted);margin-left:18px;font-family:var(--mono)">${groq.model_analysis} · ${groq.model_fast || ''}</div>` : ''}
+        <div>${dot(anth.configured)} <strong>Anthropic</strong> — ${anth.configured ? 'configurado' : 'no configurado'}</div>
+        ${anth.model ? `<div style="font-size:11px;color:var(--text-muted);margin-left:18px;font-family:var(--mono)">${anth.model}</div>` : ''}
+      </div>`;
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--yellow);font-size:13px">⚠️ No se pudo consultar el estado del proveedor IA.</div>';
+  }
+}
+
+// ── Chat contextual ───────────────────────────────────────────────────────────
+const CHAT_GREETING = `<div class="chat-message chat-ai">
+  <div class="chat-bubble">¡Hola! Soy tu asistente de inversiones. Podés preguntarme sobre mercados, estrategias, comparar activos o pedir análisis. Tengo contexto de tu portfolio cuando está cargado. ¿En qué puedo ayudarte?</div>
+</div>`;
+
+let chatHistory = [];  // [{role: 'user'|'assistant', content}] — se envía al backend
+
+function chatContextSymbol() {
+  // Si el usuario está mirando un activo en Explorar, ese es el contexto del chat
+  const exploring = document.getElementById('page-explorar').classList.contains('active');
+  return exploring && currentDetailSymbol ? currentDetailSymbol : null;
+}
+
+function toggleChat() {
+  const panel = document.getElementById('chat-panel');
+  const open = panel.classList.toggle('open');
+  if (!open) return;
+  const input = document.getElementById('chat-input');
+  const hint = document.getElementById('chat-context-hint');
+  const ctxSym = chatContextSymbol();
+  if (ctxSym) {
+    input.placeholder = `Preguntá sobre ${ctxSym}...`;
+    hint.textContent = `📎 Contexto: estás mirando ${ctxSym} — se adjunta a tus preguntas.`;
+  } else {
+    input.placeholder = 'Preguntá sobre mercados, estrategias, activos...';
+    hint.textContent = '';
+  }
+  input.focus();
+}
+
+function clearChat() {
+  chatHistory = [];
+  document.getElementById('chat-messages').innerHTML = CHAT_GREETING;
+  showToast('🗑 Conversación reiniciada');
+}
+
+async function sendChat() {
+  const input = document.getElementById('chat-input');
+  const question = input.value.trim();
+  if (!question) return;
+
+  const messages = document.getElementById('chat-messages');
+  messages.innerHTML += `<div class="chat-message chat-user"><div class="chat-bubble">${question}</div></div>`;
+  messages.innerHTML += `<div id="chat-loading" class="chat-message chat-ai"><div class="chat-bubble"><div class="spinner"></div></div></div>`;
+  messages.scrollTop = messages.scrollHeight;
+  input.value = '';
+
+  const body = { question, history: chatHistory.slice(-20) };
+  const ctxSym = chatContextSymbol();
+  if (ctxSym) body.context_symbol = ctxSym;
+
+  try {
+    const resp = await fetch('/api/chat', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await resp.json();
+    document.getElementById('chat-loading').remove();
+    const answer = data.answer || data.error || 'Sin respuesta';
+    messages.innerHTML += `<div class="chat-message chat-ai"><div class="chat-bubble">${answer.replace(/\n/g, '<br>')}</div></div>`;
+    messages.scrollTop = messages.scrollHeight;
+    if (data.answer) {
+      chatHistory.push({ role: 'user', content: question });
+      chatHistory.push({ role: 'assistant', content: data.answer });
+    }
+  } catch(e) {
+    document.getElementById('chat-loading').remove();
+    messages.innerHTML += `<div class="chat-message chat-ai"><div class="chat-bubble" style="color:var(--red)">❌ Error de conexión</div></div>`;
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
+document.getElementById('chat-messages').innerHTML = CHAT_GREETING;
 loadPortfolio();
+loadHoyExtras();
 initSmartAlerts();
 </script>
 </body>

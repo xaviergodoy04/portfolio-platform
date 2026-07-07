@@ -3,9 +3,18 @@ Radar de Oportunidades — escanea activos y los rankea en 3 dimensiones:
   - entry_score  (0-100): qué tan buena es la entrada técnica AHORA (dip, RSI, momentum)
   - growth_score (0-100): potencial de crecimiento de la empresa
   - risk_score   (0-100): nivel de riesgo (100 = muy arriesgado)
+
+Los datos vienen de modules.market_data (get_ticker_info / get_history),
+que cachea en memoria: un re-scan dentro del TTL no vuelve a pegarle a
+yfinance. El escaneo se paraleliza con un ThreadPoolExecutor.
 """
-import yfinance as yf
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import pandas as pd
+
+from modules.market_data import get_ticker_info, get_history
+
+MAX_WORKERS = 8  # hilos para escanear símbolos en paralelo
 
 
 UNIVERSE = {
@@ -239,6 +248,57 @@ def _growth_label(score: int) -> str:
     return "BAJO"
 
 
+def _scan_symbol(symbol: str, extra_symbols: list = None) -> dict | None:
+    """Escanea un símbolo y arma su resultado. Retorna None si no hay datos.
+    Solo usa variables locales: es seguro correrlo en paralelo desde varios hilos."""
+    info = get_ticker_info(symbol)  # cacheado; None si falla o no hay precio
+    if not info:
+        return None
+
+    current = info.get("currentPrice") or info.get("regularMarketPrice")
+    if not current:
+        return None
+
+    hist = get_history(symbol, "1y")  # cacheado 600 s
+    if "error" not in hist and hist.get("close"):
+        prices = pd.Series(hist["close"])
+    else:
+        prices = pd.Series([], dtype=float)
+
+    entry_score, entry_m = _calc_entry_score(info, prices)
+    growth_score, growth_m = _calc_growth_score(info)
+    risk_score, risk_m = _calc_risk_score(info, prices)
+
+    # Sector del universo curado
+    sector_label = info.get("sector") or "Otro"
+    for sec, syms in UNIVERSE.items():
+        if symbol in syms:
+            sector_label = sec
+            break
+    if extra_symbols and symbol in [s.upper() for s in extra_symbols]:
+        if symbol not in ALL_SYMBOLS:
+            sector_label = info.get("sector") or "Watchlist"
+
+    return {
+        "symbol": symbol,
+        "name": info.get("longName") or info.get("shortName", ""),
+        "sector_label": sector_label,
+        "current_price": current,
+        "change_pct_today": info.get("regularMarketChangePercent", 0),
+        "52w_high": info.get("fiftyTwoWeekHigh"),
+        "52w_low": info.get("fiftyTwoWeekLow"),
+        "market_cap": info.get("marketCap"),
+        # Scores
+        "entry_score": entry_score,
+        "growth_score": growth_score,
+        "risk_score": risk_score,
+        "risk_label": _risk_label(risk_score),
+        "growth_label": _growth_label(growth_score),
+        # Métricas detalladas
+        **entry_m, **growth_m, **risk_m,
+    }
+
+
 def scan(extra_symbols: list = None) -> dict:
     symbols_to_scan = list(ALL_SYMBOLS)
     if extra_symbols:
@@ -250,55 +310,23 @@ def scan(extra_symbols: list = None) -> dict:
     results = []
     errors = []
 
-    for symbol in symbols_to_scan:
-        try:
-            ticker = yf.Ticker(symbol)
-            info = ticker.info
-            hist = ticker.history(period="1y")
-
-            current = info.get("currentPrice") or info.get("regularMarketPrice")
-            if not info or not current:
+    # Escaneo en paralelo: cada símbolo hace 1-2 requests a yfinance (o pega
+    # en el cache), así el scan completo baja de minutos a decenas de segundos.
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(_scan_symbol, symbol, extra_symbols): symbol
+            for symbol in symbols_to_scan
+        }
+        for future in as_completed(futures):
+            symbol = futures[future]
+            try:
+                result = future.result()
+            except Exception:
+                result = None
+            if result is not None:
+                results.append(result)
+            else:
                 errors.append(symbol)
-                continue
-
-            prices = pd.Series(hist["Close"].tolist()) if not hist.empty else pd.Series([])
-
-            entry_score, entry_m = _calc_entry_score(info, prices)
-            growth_score, growth_m = _calc_growth_score(info)
-            risk_score, risk_m = _calc_risk_score(info, prices)
-
-            # Sector del universo curado
-            sector_label = info.get("sector") or "Otro"
-            for sec, syms in UNIVERSE.items():
-                if symbol in syms:
-                    sector_label = sec
-                    break
-            if extra_symbols and symbol in [s.upper() for s in extra_symbols]:
-                if symbol not in ALL_SYMBOLS:
-                    sector_label = info.get("sector") or "Watchlist"
-
-            result = {
-                "symbol": symbol,
-                "name": info.get("longName") or info.get("shortName", ""),
-                "sector_label": sector_label,
-                "current_price": current,
-                "change_pct_today": info.get("regularMarketChangePercent", 0),
-                "52w_high": info.get("fiftyTwoWeekHigh"),
-                "52w_low": info.get("fiftyTwoWeekLow"),
-                "market_cap": info.get("marketCap"),
-                # Scores
-                "entry_score": entry_score,
-                "growth_score": growth_score,
-                "risk_score": risk_score,
-                "risk_label": _risk_label(risk_score),
-                "growth_label": _growth_label(growth_score),
-                # Métricas detalladas
-                **entry_m, **growth_m, **risk_m,
-            }
-            results.append(result)
-
-        except Exception:
-            errors.append(symbol)
 
     # Ordenar por entry_score por defecto
     results.sort(key=lambda x: x.get("entry_score", 0), reverse=True)

@@ -63,8 +63,12 @@ RSS_SOURCES = [
     ("HN · IA",             "https://hnrss.org/newest?q=AI+OR+LLM+OR+OpenAI+OR+Anthropic&points=80", "VOCES"),
 
     # ── MERCADOS ──
-    ("Reuters Business",    "https://feeds.reuters.com/reuters/businessNews", "MERCADOS"),
-    ("Reuters Markets",     "https://feeds.reuters.com/reuters/financialNews", "MERCADOS"),
+    # Los feeds RSS directos de Reuters murieron (feeds.reuters.com retorna 0
+    # entries desde 2020); se accede vía el proxy de Google News, validado con
+    # entries frescos. WSJ Markets y Seeking Alpha también validados (2026-07).
+    ("Reuters (Google News)", "https://news.google.com/rss/search?q=site:reuters.com+markets&hl=en-US&gl=US&ceid=US:en", "MERCADOS"),
+    ("WSJ Markets",         "https://feeds.content.dowjones.io/public/rss/RSSMarketsMain", "MERCADOS"),
+    ("Seeking Alpha",       "https://seekingalpha.com/market_currents.xml", "MERCADOS"),
     ("CNBC Top News",       "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114", "MERCADOS"),
     ("CNBC Finance",        "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664", "MERCADOS"),
     ("MarketWatch",         "https://feeds.content.dowjones.io/public/rss/mw_topstories", "MERCADOS"),
@@ -292,7 +296,7 @@ def _collect_rss(sources: list, max_age_hours: int) -> list[NewsItem]:
             if feed.bozo and not feed.entries:
                 continue
 
-            is_tier1 = any(t in source_name for t in ["Reuters", "CNBC", "Federal"])
+            is_tier1 = any(t in source_name for t in ["Reuters", "WSJ", "CNBC", "Federal"])
             is_fed = "Federal" in source_name
             # Fuentes autoritativas / curadas pesan más para no perderlas en el filtro
             curated = is_tier1 or section in SLOW_SECTIONS
@@ -314,6 +318,10 @@ def _collect_rss(sources: list, max_age_hours: int) -> list[NewsItem]:
                     continue
 
                 title = entry.get("title", "").strip()
+                # El proxy de Google News agrega " - Reuters" al final del título;
+                # se limpia para dedup y lectura (la fuente ya se muestra aparte)
+                if title.endswith(" - Reuters"):
+                    title = title[: -len(" - Reuters")].strip()
                 summary = entry.get("summary", entry.get("description", "")).strip()
                 url_entry = entry.get("link", "")
 

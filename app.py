@@ -337,12 +337,57 @@ def check():
     return jsonify(pending + triggered)
 
 
+# ── Watchlist ────────────────────────────────────────────────────────────────
+
+@app.route("/api/watchlist", methods=["GET"])
+def watchlist_list():
+    """Watchlist con quote fresco por símbolo (get_quote cachea 120 s)."""
+    items = db.get_watchlist()
+    for it in items:
+        q = get_quote(it["symbol"])
+        if "error" in q:
+            it["error"] = q["error"]
+        else:
+            it["price"] = q.get("price")
+            it["change_pct"] = q.get("change_pct")
+            it["name"] = q.get("name", "")
+    return jsonify(items)
+
+
+@app.route("/api/watchlist", methods=["POST"])
+def watchlist_add():
+    body = request.get_json(silent=True) or {}
+    symbol = (body.get("symbol") or "").strip().upper()
+    note = (body.get("note") or "").strip()
+    if not symbol:
+        return jsonify({"error": "Símbolo requerido"}), 400
+
+    # Validar que el ticker exista antes de guardarlo
+    q = get_quote(symbol)
+    if "error" in q:
+        return jsonify({"error": f"No hay datos para '{symbol}' — verificá el ticker"}), 400
+
+    entry = db.add_to_watchlist(symbol, note)
+    return jsonify(entry), 201
+
+
+@app.route("/api/watchlist/<symbol>", methods=["DELETE"])
+def watchlist_remove(symbol):
+    success = db.remove_from_watchlist(symbol.strip().upper())
+    return jsonify({"success": success})
+
+
 # ── Radar de Oportunidades ───────────────────────────────────────────────────
 
 @app.route("/api/radar")
 def radar():
     extra = request.args.get("extra", "")
     extra_symbols = [s.strip() for s in extra.split(",") if s.strip()] if extra else []
+    # La watchlist se vigila siempre: se suma a los extras sin duplicar
+    # (radar_scan ya evita duplicar contra el UNIVERSE)
+    for s in db.get_watchlist_symbols():
+        if s not in extra_symbols:
+            extra_symbols.append(s)
     data = radar_scan(extra_symbols)
     return jsonify(data)
 
@@ -415,11 +460,12 @@ def get_news():
     ttl = 6 * 3600 if do_enrich else 20 * 60
 
     port_syms = _portfolio_symbols()
+    watch_syms = {s.upper() for s in db.get_watchlist_symbols()}
 
     if not force_refresh:
         cached, age = news_cache.get(cache_key, ttl)
         if cached is not None:
-            _mark_portfolio(cached, port_syms)
+            _mark_symbols(cached, port_syms, watch_syms)
             cached["_meta"] = {"cached": True, "age_seconds": age, "enriched": do_enrich}
             return jsonify(cached)
 
@@ -458,19 +504,21 @@ def get_news():
         ]
 
     news_cache.set(cache_key, result)
-    _mark_portfolio(result, port_syms)
+    _mark_symbols(result, port_syms, watch_syms)
     result["_meta"] = {"cached": False, "age_seconds": 0, "enriched": do_enrich}
     return jsonify(result)
 
 
-def _mark_portfolio(result: dict, port_syms: set) -> None:
-    """Marca in_portfolio=True en noticias que mencionan algún símbolo del portfolio."""
+def _mark_symbols(result: dict, port_syms: set, watch_syms: set) -> None:
+    """Marca in_portfolio / in_watchlist en noticias que mencionan símbolos
+    del portfolio o de la watchlist."""
     for section, items in result.items():
         if section.startswith("_"):
             continue
         for it in items:
             syms = {s.upper() for s in it.get("symbols", [])}
             it["in_portfolio"] = bool(syms & port_syms)
+            it["in_watchlist"] = bool(syms & watch_syms)
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────

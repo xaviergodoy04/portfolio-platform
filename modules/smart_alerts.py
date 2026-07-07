@@ -101,6 +101,12 @@ def check_opportunities() -> dict:
     min_entry  = cfg.get("min_entry_score", 55)
     extra      = cfg.get("extra_symbols", [])
 
+    # Las señales automáticas también vigilan la watchlist del usuario
+    # (dedupe preservando el orden; scan() ya evita duplicar contra el universo)
+    extra = list(dict.fromkeys(
+        [str(s).strip().upper() for s in [*extra, *db.get_watchlist_symbols()] if str(s).strip()]
+    ))
+
     # Escanear solo los símbolos del universo + extras (no hacer full scan siempre)
     data = scan(extra)
     results = data.get("results", [])

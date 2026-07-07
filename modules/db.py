@@ -17,6 +17,8 @@ from datetime import datetime, timedelta
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 DB_PATH = os.path.join(DATA_DIR, "portfolio.db")
+BACKUPS_DIR = os.path.join(DATA_DIR, "backups")
+BACKUPS_KEEP = 14  # cuántos backups diarios conservar
 
 ALERTS_JSON = os.path.join(DATA_DIR, "alerts.json")
 SMART_ALERTS_JSON = os.path.join(DATA_DIR, "smart_alerts.json")
@@ -103,6 +105,12 @@ CREATE TABLE IF NOT EXISTS events (
     method TEXT,
     status INTEGER,
     duration_ms REAL
+);
+
+CREATE TABLE IF NOT EXISTS watchlist (
+    symbol TEXT PRIMARY KEY,
+    added_at TEXT,
+    note TEXT DEFAULT ''
 );
 """
 
@@ -246,6 +254,107 @@ def has_snapshot_today() -> bool:
             "SELECT 1 FROM portfolio_snapshots WHERE date = ?", (today,)
         ).fetchone()
     return row is not None
+
+
+# ── Backup diario de la base ─────────────────────────────────────────────────
+
+def backup_db() -> str | None:
+    """
+    Copia data/portfolio.db a data/backups/portfolio-YYYY-MM-DD.db usando la
+    API de backup de sqlite3 (conn.backup()), que es segura aunque la DB esté
+    siendo escrita (a diferencia de un shutil.copy). Un backup por día: si ya
+    existe el de hoy, se sobreescribe (queda el estado más reciente del día).
+
+    Rotación: conserva los últimos BACKUPS_KEEP backups y borra los más viejos.
+    Retorna la ruta del backup creado, o None si no hay DB que respaldar.
+    """
+    if not os.path.exists(DB_PATH):
+        return None
+
+    os.makedirs(BACKUPS_DIR, exist_ok=True)
+    dest_path = os.path.join(
+        BACKUPS_DIR, f"portfolio-{datetime.now().strftime('%Y-%m-%d')}.db"
+    )
+
+    # El lock global serializa contra las escrituras de esta app; conn.backup()
+    # además es consistente frente a cualquier otro escritor del archivo.
+    with _lock:
+        src = sqlite3.connect(DB_PATH)
+        try:
+            dest = sqlite3.connect(dest_path)
+            try:
+                src.backup(dest)
+            finally:
+                dest.close()
+        finally:
+            src.close()
+
+    _rotate_backups()
+    return dest_path
+
+
+def _rotate_backups(keep: int = BACKUPS_KEEP):
+    """Borra los backups más viejos, conservando los `keep` más recientes.
+    El nombre portfolio-YYYY-MM-DD.db ordena cronológicamente de forma natural."""
+    try:
+        backups = sorted(
+            f for f in os.listdir(BACKUPS_DIR)
+            if f.startswith("portfolio-") and f.endswith(".db")
+        )
+    except FileNotFoundError:
+        return
+    for old in backups[:-keep] if keep > 0 else backups:
+        try:
+            os.remove(os.path.join(BACKUPS_DIR, old))
+        except OSError:
+            pass
+
+
+def has_backup_today() -> bool:
+    """True si ya existe el backup de hoy en data/backups/."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    return os.path.exists(os.path.join(BACKUPS_DIR, f"portfolio-{today}.db"))
+
+
+# ── Watchlist ────────────────────────────────────────────────────────────────
+
+def get_watchlist() -> list:
+    """Entradas de la watchlist, la más reciente primero."""
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT symbol, added_at, note FROM watchlist ORDER BY added_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_watchlist_symbols() -> list:
+    """Solo los símbolos (para sumarlos al radar y a las smart alerts)."""
+    with db_conn() as conn:
+        rows = conn.execute("SELECT symbol FROM watchlist").fetchall()
+    return [r["symbol"] for r in rows]
+
+
+def add_to_watchlist(symbol: str, note: str = "") -> dict:
+    """Agrega un símbolo a la watchlist. Si ya existe, retorna la entrada actual."""
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT symbol, added_at, note FROM watchlist WHERE symbol = ?", (symbol,)
+        ).fetchone()
+        if row:
+            return dict(row)
+        entry = {"symbol": symbol, "added_at": datetime.now().isoformat(), "note": note or ""}
+        conn.execute(
+            "INSERT INTO watchlist (symbol, added_at, note) VALUES (?, ?, ?)",
+            (entry["symbol"], entry["added_at"], entry["note"]),
+        )
+    return entry
+
+
+def remove_from_watchlist(symbol: str) -> bool:
+    """Quita un símbolo de la watchlist. True si existía."""
+    with db_conn() as conn:
+        cur = conn.execute("DELETE FROM watchlist WHERE symbol = ?", (symbol,))
+        return cur.rowcount > 0
 
 
 # ── Instrumentación de uso de endpoints ──────────────────────────────────────

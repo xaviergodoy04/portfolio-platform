@@ -9,6 +9,8 @@ Jobs:
   de la config (leída de la DB en cada pasada, así los cambios aplican al toque).
 - Snapshot diario del portfolio: todos los días a las 18:30 hora local, y una
   corrida inmediata al arrancar si todavía no hay snapshot de hoy.
+- Backup diario de la DB: todos los días a las 18:45 (después del snapshot),
+  y una corrida inmediata al arrancar si todavía no hay backup de hoy.
 
 Todos los jobs capturan sus excepciones y las loggean: jamás tumban el server.
 """
@@ -141,6 +143,20 @@ def daily_snapshot_job():
         logger.exception("Error en job de snapshot diario")
 
 
+# ── Job: backup diario de la DB ──────────────────────────────────────────────
+
+def daily_backup_job():
+    """Backup diario de la DB a data/backups/ con rotación. Nunca crashea."""
+    try:
+        path = db.backup_db()
+        if path:
+            logger.info("Backup diario de la DB guardado en %s", path)
+        else:
+            logger.info("Backup diario: no existe la DB todavía, se omite")
+    except Exception:
+        logger.exception("Error en job de backup diario de la DB")
+
+
 # ── Inicialización ───────────────────────────────────────────────────────────
 
 def init_scheduler():
@@ -163,6 +179,10 @@ def init_scheduler():
     sched.add_job(daily_snapshot_job, CronTrigger(hour=18, minute=30),
                   id="daily_snapshot", max_instances=1, coalesce=True)
 
+    # Backup diario de la DB a las 18:45 (después del snapshot)
+    sched.add_job(daily_backup_job, CronTrigger(hour=18, minute=45),
+                  id="daily_backup", max_instances=1, coalesce=True)
+
     sched.start()
     _scheduler = sched
 
@@ -172,6 +192,13 @@ def init_scheduler():
             sched.add_job(daily_snapshot_job, id="snapshot_startup")
     except Exception:
         logger.exception("No se pudo encolar el snapshot inicial")
+
+    # Si todavía no hay backup de hoy, correr uno ahora (en background)
+    try:
+        if not db.has_backup_today():
+            sched.add_job(daily_backup_job, id="backup_startup")
+    except Exception:
+        logger.exception("No se pudo encolar el backup inicial")
 
     logger.info("Scheduler iniciado con jobs: %s", [j.id for j in sched.get_jobs()])
     print(f"⏰ Scheduler activo: {[j.id for j in sched.get_jobs()]}")

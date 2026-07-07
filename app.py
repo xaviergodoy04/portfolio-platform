@@ -38,6 +38,7 @@ from modules.news.collector import collect_all as news_collect, SECTIONS as NEWS
 from modules.news.enricher import enrich_items
 from modules.news import cache as news_cache
 from modules.news import health as news_health
+from modules.news.affinity import affinity_bonus, invalidate_profile
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
@@ -551,6 +552,7 @@ def get_news():
     port_syms = _portfolio_symbols()
     watch_syms = {s.upper() for s in db.get_watchlist_symbols()}
     _mark_symbols(result, port_syms, watch_syms)
+    _apply_feedback_and_affinity(result)
     result["_meta"] = {
         "cached": from_cache,
         "age_seconds": age or 0,
@@ -583,6 +585,93 @@ def _mark_symbols(result: dict, port_syms: set, watch_syms: set) -> None:
             syms = {s.upper() for s in it.get("symbols", [])}
             it["in_portfolio"] = bool(syms & port_syms)
             it["in_watchlist"] = bool(syms & watch_syms)
+
+
+def _apply_feedback_and_affinity(result: dict) -> None:
+    """
+    Mergea el feedback guardado (liked/read, lookup O(1) por url_hash) y
+    calcula relevance_score_personal = relevance_score + affinity_bonus.
+    El score original NO se pisa: el personal es un campo adicional y cada
+    sección se reordena por él. El pool cacheado queda intacto (se cachea
+    limpio antes de este paso).
+    """
+    fb_map = db.get_news_feedback_map()
+    for section, items in result.items():
+        if section.startswith("_"):
+            continue
+        for it in items:
+            fb = fb_map.get(db.news_url_hash(it.get("url") or ""))
+            it["liked"] = bool(fb and fb.get("liked"))
+            it["read"] = bool(fb and fb.get("read"))
+            it["relevance_score_personal"] = round(
+                (it.get("relevance_score") or 0) + affinity_bonus(it), 2
+            )
+        items.sort(key=lambda x: x["relevance_score_personal"], reverse=True)
+
+
+@app.route("/api/news/feedback", methods=["POST"])
+def news_feedback_set():
+    """
+    Registra feedback sobre una noticia (upsert parcial):
+    body {url, title, section, source, symbols, liked?: bool, read?: bool}.
+    Solo pisa los flags presentes en el body. Retorna el estado resultante.
+    """
+    body = request.get_json(silent=True) or {}
+    url = (body.get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "Falta 'url'"}), 400
+    liked, read = body.get("liked"), body.get("read")
+    if liked is None and read is None:
+        return jsonify({"error": "Mandá al menos 'liked' o 'read'"}), 400
+
+    state = db.set_news_feedback(
+        {
+            "url": url,
+            "title": body.get("title") or "",
+            "section": body.get("section") or "",
+            "source": body.get("source") or "",
+            "symbols": body.get("symbols") or [],
+        },
+        liked=bool(liked) if liked is not None else None,
+        read=bool(read) if read is not None else None,
+    )
+    # El próximo /api/news reconstruye el perfil con este feedback incluido
+    invalidate_profile()
+    return jsonify(state)
+
+
+@app.route("/api/news/feedback/stats")
+def news_feedback_stats():
+    """Agregados del feedback de los últimos 90 días para el tablero:
+    por sección (shown_proxy = likes + reads), top fuentes y símbolos likeados."""
+    rows = db.get_feedback_rows(90)
+    by_section, src_likes, sym_likes = {}, {}, {}
+    for r in rows:
+        sec = r.get("section") or "SIN_SECCION"
+        agg = by_section.setdefault(sec, {"shown_proxy": 0, "likes": 0, "reads": 0})
+        if r.get("liked"):
+            agg["likes"] += 1
+            src = r.get("source") or "?"
+            src_likes[src] = src_likes.get(src, 0) + 1
+            for s in r.get("symbols") or []:
+                s = (s or "").strip().upper()
+                if s:
+                    sym_likes[s] = sym_likes.get(s, 0) + 1
+        if r.get("read"):
+            agg["reads"] += 1
+        agg["shown_proxy"] = agg["likes"] + agg["reads"]
+
+    top = lambda d, key: [
+        {key: k, "likes": v}
+        for k, v in sorted(d.items(), key=lambda kv: kv[1], reverse=True)[:10]
+    ]
+    return jsonify({
+        "days": 90,
+        "total_items": len(rows),
+        "by_section": by_section,
+        "top_sources_liked": top(src_likes, "source"),
+        "top_symbols_liked": top(sym_likes, "symbol"),
+    })
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────

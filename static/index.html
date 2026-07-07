@@ -531,6 +531,59 @@
       margin-top: 2px;
     }
     .star-btn { font-size: 13px; }
+
+    /* ── Feedback de noticias (like / leída) ── */
+    .news-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 7px;
+    }
+    .news-fb-btn {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,.1);
+      color: var(--text-muted);
+      border-radius: 6px;
+      padding: 2px 9px;
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: color .15s, border-color .15s, background .15s;
+      line-height: 1.6;
+    }
+    .news-fb-btn:hover {
+      color: rgba(255,255,255,.75);
+      border-color: rgba(255,255,255,.28);
+    }
+    .news-fb-btn.like.active {
+      color: rgba(163,230,53,.9);
+      border-color: rgba(163,230,53,.35);
+      background: rgba(163,230,53,.1);
+    }
+    .news-fb-btn.read-toggle.active {
+      color: rgba(96,165,250,.9);
+      border-color: rgba(96,165,250,.3);
+      background: rgba(96,165,250,.08);
+    }
+    .news-card.is-read { opacity: .55; }
+    .news-card.is-read:hover { opacity: .8; }
+    .news-read-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 4px 4px;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+    }
+    .news-read-bar .news-fb-btn.active {
+      color: rgba(255,255,255,.75);
+      border-color: rgba(255,255,255,.3);
+      background: rgba(255,255,255,.06);
+    }
+    .news-read-hidden-count {
+      color: var(--text-faint);
+      font-size: 11px;
+      font-family: var(--mono);
+    }
     .watch-card {
       cursor: pointer;
       background: var(--surface2);
@@ -1507,21 +1560,34 @@ async function loadHoyNews() {
     if (newsTotal() === 0) {
       const resp = await fetch('/api/news?enrich=false&max=80');
       _newsData = await resp.json();
+      syncNewsFeedbackFromData();
       renderCurrentNews();
     }
-    const list = portfolioNewsList().slice(0, 5);
-    if (!list.length) {
-      el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">Ninguna noticia reciente menciona activos de tu portfolio o watchlist.</div>';
-      return;
-    }
-    el.innerHTML = list.map(n => `
-      <div style="padding:10px 4px;border-bottom:1px solid var(--border-soft)">
-        <a href="${n.url}" target="_blank" rel="noopener" style="color:rgba(255,255,255,0.82);text-decoration:none;font-weight:500;font-size:13.5px;line-height:1.45">${n.title}</a>
-        <div class="news-meta" style="margin:4px 0 0">${n.source} · ${n.published}${n.symbols && n.symbols.length ? ' · ' + n.symbols.map(s => '$' + s).join(' ') : ''}</div>
-      </div>`).join('');
+    renderHoyNews();
   } catch(e) {
     el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">⚠️ No se pudieron cargar las noticias.</div>';
   }
+}
+
+function renderHoyNews() {
+  // Bloque "Noticias de tus activos" en Hoy, con los mismos botones de feedback
+  const el = document.getElementById('hoy-news-list');
+  if (!el || newsTotal() === 0) return;
+  const list = portfolioNewsList().slice(0, 5);
+  if (!list.length) {
+    el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:13px">Ninguna noticia reciente menciona activos de tu portfolio o watchlist.</div>';
+    return;
+  }
+  el.innerHTML = list.map(n => {
+    const k = newsKey(n);
+    const fb = fbState(n.url);
+    return `
+      <div style="padding:10px 4px;border-bottom:1px solid var(--border-soft);${fb.read ? 'opacity:.55' : ''}">
+        <a href="${n.url}" target="_blank" rel="noopener" onclick="markNewsReadOnOpen(${k})" style="color:rgba(255,255,255,0.82);text-decoration:none;font-weight:500;font-size:13.5px;line-height:1.45">${n.title}</a>
+        <div class="news-meta" style="margin:4px 0 0">${n.source} · ${n.published}${n.symbols && n.symbols.length ? ' · ' + n.symbols.map(s => '$' + s).join(' ') : ''}</div>
+        ${newsFeedbackButtonsHtml(n)}
+      </div>`;
+  }).join('');
 }
 
 // ── Watchlist ─────────────────────────────────────────────────────────────────
@@ -2672,6 +2738,110 @@ let _newsData = { TECH_IA: [], IA_TECNICA: [], STARTUPS: [], VOCES: [], MERCADOS
 let _newsTab = 'PORTFOLIO';
 let _newsShown = {};   // por sección: cuántas se están mostrando
 let _newsEnriching = false;  // hay un enriquecimiento IA en curso
+let _newsShowRead = {};      // por sección: si se muestran las leídas (default: ocultas)
+
+// ── Feedback de noticias (like / leída) ────────────────────────────────────
+// Estado global por URL, cargado con las noticias (vienen con liked/read del
+// backend) y actualizado de forma optimista al togglear (revert si falla).
+const newsFeedback = {};          // url -> {liked, read}
+const _newsKeyToItem = [];        // registro item por clave numérica (para onclick
+const _newsUrlToKey = {};         //   sin interpolar URLs dentro del HTML)
+
+function newsKey(n) {
+  if (_newsUrlToKey[n.url] === undefined) {
+    _newsUrlToKey[n.url] = _newsKeyToItem.length;
+    _newsKeyToItem.push(n);
+  } else {
+    _newsKeyToItem[_newsUrlToKey[n.url]] = n;  // refresca la referencia tras un reload
+  }
+  return _newsUrlToKey[n.url];
+}
+
+function fbState(url) {
+  return newsFeedback[url] || { liked: false, read: false };
+}
+
+function syncNewsFeedbackFromData() {
+  NEWS_SECTIONS.forEach(sec => (_newsData[sec] || []).forEach(n => {
+    newsFeedback[n.url] = { liked: !!n.liked, read: !!n.read };
+  }));
+}
+
+function newsScore(n) {
+  // Score personalizado (con afinidad) si el backend lo mandó; si no, el base
+  return n.relevance_score_personal != null ? n.relevance_score_personal : (n.relevance_score || 0);
+}
+
+async function sendNewsFeedback(n, patch) {
+  const resp = await fetch('/api/news/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      url: n.url, title: n.title, section: n.section || '',
+      source: n.source || '', symbols: n.symbols || [], ...patch,
+    }),
+  });
+  if (!resp.ok) throw new Error('feedback HTTP ' + resp.status);
+  return resp.json();
+}
+
+function rerenderNewsEverywhere() {
+  renderCurrentNews();
+  renderHoyNews();
+}
+
+async function toggleNewsLike(key) {
+  const n = _newsKeyToItem[key];
+  if (!n) return;
+  const prev = { ...fbState(n.url) };
+  newsFeedback[n.url] = { ...prev, liked: !prev.liked };
+  rerenderNewsEverywhere();
+  try {
+    await sendNewsFeedback(n, { liked: !prev.liked });
+  } catch (e) {
+    console.error(e);
+    newsFeedback[n.url] = prev;   // revert optimista
+    rerenderNewsEverywhere();
+  }
+}
+
+async function toggleNewsRead(key) {
+  const n = _newsKeyToItem[key];
+  if (!n) return;
+  const prev = { ...fbState(n.url) };
+  newsFeedback[n.url] = { ...prev, read: !prev.read };
+  rerenderNewsEverywhere();
+  try {
+    await sendNewsFeedback(n, { read: !prev.read });
+  } catch (e) {
+    console.error(e);
+    newsFeedback[n.url] = prev;
+    rerenderNewsEverywhere();
+  }
+}
+
+function markNewsReadOnOpen(key) {
+  // Al abrir el link: marcado automático como leída, sin bloquear la navegación
+  // (el link abre en otra pestaña; el re-render se difiere para no interferir)
+  const n = _newsKeyToItem[key];
+  if (!n) return;
+  const prev = fbState(n.url);
+  if (prev.read) return;
+  newsFeedback[n.url] = { ...prev, read: true };
+  sendNewsFeedback(n, { read: true }).catch(e => console.error(e));
+  setTimeout(rerenderNewsEverywhere, 150);
+}
+
+function toggleShowRead(section) {
+  _newsShowRead[section] = !_newsShowRead[section];
+  renderNewsSection(section);
+}
+
+function isHiddenRead(n) {
+  // Las leídas se ocultan por default, pero las likeadas se muestran siempre
+  const f = fbState(n.url);
+  return f.read && !f.liked;
+}
 
 function newsTotal() {
   return NEWS_SECTIONS.reduce((s, sec) => s + (_newsData[sec] || []).length, 0);
@@ -2684,7 +2854,7 @@ function portfolioNewsList() {
   NEWS_SECTIONS.forEach(sec => (_newsData[sec] || []).forEach(n => {
     if ((n.in_portfolio || n.in_watchlist) && !seen.has(n.url)) { seen.add(n.url); out.push(n); }
   }));
-  out.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
+  out.sort((a, b) => newsScore(b) - newsScore(a));
   return out;
 }
 
@@ -2762,7 +2932,22 @@ async function enrichCurrentTab() {
   }
 }
 
+function newsFeedbackButtonsHtml(n) {
+  const k = newsKey(n);
+  const fb = fbState(n.url);
+  return `
+    <div class="news-actions">
+      <button class="news-fb-btn like ${fb.liked ? 'active' : ''}" onclick="toggleNewsLike(${k})"
+        title="${fb.liked ? 'Quitar me gusta' : 'Me gusta: mejora el ranking de noticias parecidas'}">👍${fb.liked ? ' Te gusta' : ''}</button>
+      <button class="news-fb-btn read-toggle ${fb.read ? 'active' : ''}" onclick="toggleNewsRead(${k})"
+        title="${fb.read ? 'Marcar como no leída' : 'Marcar como leída'}">✓ Leída</button>
+    </div>`;
+}
+
 function newsCardHtml(n) {
+  const k = newsKey(n);
+  const fb = fbState(n.url);
+
   const symbolsHtml = n.symbols && n.symbols.length
     ? `<div class="news-symbols">${n.symbols.map(s =>
         `<span class="${n.in_portfolio ? 'in-port' : ''}">$${s}</span>`).join('')}</div>`
@@ -2781,10 +2966,10 @@ function newsCardHtml(n) {
     : '';
 
   return `
-    <div class="news-card ${n.in_portfolio ? 'portfolio-hit' : (n.in_watchlist ? 'watchlist-hit' : '')}">
+    <div class="news-card ${n.in_portfolio ? 'portfolio-hit' : (n.in_watchlist ? 'watchlist-hit' : '')} ${fb.read ? 'is-read' : ''}">
       <div class="news-card-header">
         <div class="news-title" style="flex:1">
-          <a href="${n.url}" target="_blank" rel="noopener">${n.title}</a>
+          <a href="${n.url}" target="_blank" rel="noopener" onclick="markNewsReadOnOpen(${k})">${n.title}</a>
         </div>
         ${portBadge}
         ${watchBadge}
@@ -2792,25 +2977,40 @@ function newsCardHtml(n) {
       <div class="news-meta">${n.source} · ${n.published}</div>
       ${symbolsHtml}
       ${contextHtml}
+      ${newsFeedbackButtonsHtml(n)}
     </div>`;
 }
 
 function renderNewsSection(section) {
   const el = document.getElementById('news-' + section);
   if (!el) return;
-  const list = section === 'PORTFOLIO' ? portfolioNewsList() : (_newsData[section] || []);
+  const all = section === 'PORTFOLIO' ? portfolioNewsList() : (_newsData[section] || []);
+
+  // Leídas ocultas por default (salvo las likeadas, que se muestran siempre)
+  const showRead = !!_newsShowRead[section];
+  const hiddenCount = all.filter(isHiddenRead).length;
+  const list = showRead ? all : all.filter(n => !isHiddenRead(n));
+
+  let readBar = '';
+  if (hiddenCount > 0 || showRead) {
+    readBar = `<div class="news-read-bar">
+      <button class="news-fb-btn ${showRead ? 'active' : ''}" onclick="toggleShowRead('${section}')">
+        👁 ${showRead ? 'Ocultar leídas' : 'Mostrar leídas'}</button>
+      ${!showRead && hiddenCount ? `<span class="news-read-hidden-count">(${hiddenCount} leída${hiddenCount === 1 ? '' : 's'} oculta${hiddenCount === 1 ? '' : 's'})</span>` : ''}
+    </div>`;
+  }
 
   if (!list.length) {
     const msg = section === 'PORTFOLIO'
       ? 'Ninguna noticia reciente menciona activos de tu portfolio o watchlist'
-      : 'No se encontraron noticias';
-    el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-muted)">${msg}</div>`;
+      : (hiddenCount ? 'Todas las noticias de esta sección están marcadas como leídas' : 'No se encontraron noticias');
+    el.innerHTML = readBar + `<div style="padding:40px;text-align:center;color:var(--text-muted)">${msg}</div>`;
     return;
   }
 
   const shown = _newsShown[section] || NEWS_PAGE;
   const slice = list.slice(0, shown);
-  let html = slice.map(newsCardHtml).join('');
+  let html = readBar + slice.map(newsCardHtml).join('');
   if (list.length > shown) {
     const rest = list.length - shown;
     html += `<div style="text-align:center;margin:16px 0">
@@ -2845,7 +3045,9 @@ async function loadNews(forceRefresh = false) {
     const data = await resp.json();
 
     _newsData = data;
+    syncNewsFeedbackFromData();
     renderCurrentNews();
+    renderHoyNews();
     updateNewsAIButton();
 
     const meta = data._meta || {};

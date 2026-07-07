@@ -1,10 +1,61 @@
 """
 Módulo de análisis con IA — usa AIProvider para soportar múltiples backends.
+
+El parseo de la respuesta del LLM es robusto:
+  - extract_first_json() encuentra el JSON aunque venga con texto alrededor
+    o dentro de un fence markdown.
+  - AnalysisResult (Pydantic) valida el shape que consume el frontend, con
+    defaults tolerantes para los campos opcionales.
+  - Si falla, se reintenta UNA vez con un prompt correctivo; si vuelve a
+    fallar, se retorna un error controlado con la respuesta cruda en `raw`.
 """
 import json
-from modules.market_data import get_quote, get_history
-from modules.ai_provider import AIProvider
+import logging
+
 import pandas as pd
+from pydantic import BaseModel, Field, ValidationError
+
+from modules.market_data import get_quote, get_history
+from modules.ai_provider import AIProvider, extract_first_json
+
+logger = logging.getLogger("ai_analysis")
+
+
+# ── Modelo del resultado del análisis (1:1 con lo que renderiza el frontend) ─
+
+class PriceRange(BaseModel):
+    min: float | None = None
+    max: float | None = None
+
+
+class AnalysisResult(BaseModel):
+    """Shape exacto que consume renderAnalysis() en el frontend.
+    Los opcionales tienen defaults tolerantes: si el modelo omite un campo,
+    el frontend muestra su placeholder ('—', lista vacía, etc.)."""
+    symbol: str = ""
+    recommendation: str = "N/A"          # COMPRAR | MANTENER | VENDER | ESPERAR
+    conviction: str = ""                 # ALTA | MEDIA | BAJA
+    target_price_range: PriceRange | None = None
+    time_horizon: str = ""
+    summary: str = ""
+    strengths: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    technical_signal: str = ""
+    fundamental_signal: str = ""
+    portfolio_fit: str = ""
+
+
+def _parse_analysis(text: str) -> AnalysisResult | None:
+    """Extrae y valida el JSON del análisis. None si no hay JSON válido
+    o no pasa la validación del modelo."""
+    obj = extract_first_json(text)
+    if obj is None:
+        return None
+    try:
+        return AnalysisResult.model_validate(obj)
+    except ValidationError:
+        logger.warning("JSON de IA extraído pero inválido contra AnalysisResult")
+        return None
 
 
 def _build_provider(cfg) -> AIProvider:
@@ -111,30 +162,45 @@ IMPORTANTE: Respondé SOLO con el JSON válido, sin texto adicional, sin markdow
             tier="analysis",
         )
 
-        response_text = response_text.strip()
-        # Limpiar posibles ```json ``` del response
-        if response_text.startswith("```"):
-            response_text = response_text.split("```")[1]
-            if response_text.startswith("json"):
-                response_text = response_text[4:]
-        # A veces el modelo agrega texto antes del JSON
-        if not response_text.startswith("{"):
-            start = response_text.find("{")
-            if start != -1:
-                response_text = response_text[start:]
+        result = _parse_analysis(response_text)
 
-        analysis = json.loads(response_text)
+        if result is None:
+            # UN retry con prompt correctivo, pasando la respuesta fallida
+            # como historial para que el modelo la corrija.
+            logger.warning("Respuesta de IA no parseable para %s, reintentando", symbol)
+            schema = json.dumps(
+                AnalysisResult.model_json_schema(), ensure_ascii=False
+            )
+            retry_prompt = (
+                "Tu respuesta anterior no era un JSON válido o no cumplía el formato. "
+                "Respondé ÚNICAMENTE el JSON, sin texto adicional, sin markdown ni "
+                f"bloques de código, con este schema:\n{schema}"
+            )
+            response_text, used_provider = provider.generate_with_fallback(
+                prompt=retry_prompt,
+                max_tokens=1024,
+                tier="analysis",
+                history=[
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": response_text},
+                ],
+            )
+            result = _parse_analysis(response_text)
+
+        if result is None:
+            # Error controlado: el frontend muestra `error` y queda el crudo en `raw`
+            return {
+                "error": f"La IA no devolvió un análisis en JSON válido para {symbol}",
+                "symbol": symbol,
+                "raw": response_text,
+            }
+
+        analysis = result.model_dump()
+        analysis["symbol"] = analysis["symbol"] or symbol
         analysis["data"] = {"quote": quote, "technical": technical}
         analysis["ai_provider"] = used_provider
         return analysis
 
-    except json.JSONDecodeError:
-        return {
-            "symbol": symbol,
-            "recommendation": "ERROR",
-            "summary": "No se pudo parsear la respuesta de IA",
-            "raw_response": response_text if 'response_text' in locals() else ""
-        }
     except Exception as e:
         return {"error": f"Error en análisis IA: {str(e)}"}
 

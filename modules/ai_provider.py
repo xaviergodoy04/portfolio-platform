@@ -12,6 +12,69 @@ import httpx
 import anthropic
 
 
+# ── Extracción robusta de JSON ────────────────────────────────────────────────
+
+def _balanced_json_candidates(text: str):
+    """Genera los substrings con llaves balanceadas de `text`, respetando
+    strings JSON (comillas y escapes) para no cortar en llaves dentro de un
+    valor. Cada candidato empieza en un '{' y termina en su '}' de cierre."""
+    for start, ch in enumerate(text):
+        if ch != "{":
+            continue
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(text)):
+            c = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+            else:
+                if c == '"':
+                    in_str = True
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        yield text[start:i + 1]
+                        break
+
+
+def extract_first_json(text: str) -> dict | None:
+    """
+    Extrae el primer objeto JSON válido de la respuesta de un LLM, aunque
+    venga rodeado de texto, dentro de un fence ```json ... ``` o con varios
+    bloques. Retorna el dict parseado, o None si no hay JSON válido.
+    """
+    if not text:
+        return None
+    text = text.strip()
+
+    # 1) Intento directo: la respuesta ES el JSON
+    try:
+        obj = json.loads(text)
+        if isinstance(obj, dict):
+            return obj
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 2) Buscar bloques de llaves balanceadas (cubre fences y texto alrededor)
+    for candidate in _balanced_json_candidates(text):
+        try:
+            obj = json.loads(candidate)
+            if isinstance(obj, dict):
+                return obj
+        except (json.JSONDecodeError, ValueError):
+            continue
+
+    return None
+
+
 class AIProvider:
     def __init__(self, provider: str, groq_api_key: str = "",
                  groq_model_analysis: str = "", groq_model_fast: str = "",

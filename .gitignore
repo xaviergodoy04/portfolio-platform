@@ -9,3 +9,9 @@ __pycache__/
 .idea/
 venv/
 .venv/
+
+# macOS
+.DS_Store
+
+# SQLite
+data/*.db

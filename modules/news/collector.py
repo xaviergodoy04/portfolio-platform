@@ -6,6 +6,8 @@ Tagea cada noticia como 'IA' o 'MERCADOS' según la fuente.
 Rankea por relevancia (0-10) usando palabras clave y fuente.
 """
 
+import ssl
+import certifi
 import feedparser
 import httpx
 import asyncio
@@ -13,6 +15,9 @@ import re
 from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
 from modules.news.models import NewsItem
+
+# Fix SSL en macOS: usar los certificados de certifi
+ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
 
 
 # ── Secciones ─────────────────────────────────────────────────────────────────

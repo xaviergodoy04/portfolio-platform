@@ -24,6 +24,7 @@ from modules.smart_alerts import (
 )
 import asyncio
 import time
+from modules import db
 from modules.news.collector import collect_all as news_collect
 from modules.news.enricher import enrich_news
 from modules.news import cache as news_cache
@@ -33,6 +34,20 @@ CORS(app)
 
 # Cache en memoria para el portfolio (se limpia al reiniciar)
 _portfolio_cache = {}
+
+# Hidratar el cache desde la DB: un reinicio no obliga a esperar a IBKR
+_stored_portfolio = db.load_portfolio_cache()
+if _stored_portfolio:
+    _portfolio_cache["data"] = _stored_portfolio
+
+
+def _persist_portfolio(data: dict):
+    """Guarda el portfolio en la DB y hace upsert del snapshot del día."""
+    try:
+        db.save_portfolio_cache(data)
+        db.upsert_snapshot(data)
+    except Exception as e:
+        print(f"⚠️  Error persistiendo portfolio en la DB: {e}")
 
 
 # ── Servir el frontend ───────────────────────────────────────────────────────
@@ -65,6 +80,7 @@ def get_portfolio():
         data["summary"]["total_unrealized_pnl"] = round(total_pnl, 2)
         data["summary"]["total_pnl_pct"] = round((total_pnl / cost_basis * 100) if cost_basis != 0 else 0, 2)
         _portfolio_cache["data"] = data
+        _persist_portfolio(data)
 
     return jsonify(data)
 
@@ -82,6 +98,7 @@ def upload_csv():
     if "error" not in data and data.get("positions"):
         data["positions"] = enrich_positions(data["positions"])
         _portfolio_cache["data"] = data
+        _persist_portfolio(data)
 
     return jsonify(data)
 
@@ -111,7 +128,19 @@ def set_manual_portfolio():
         "source": "manual"
     }
     _portfolio_cache["data"] = data
+    _persist_portfolio(data)
     return jsonify(data)
+
+
+@app.route("/api/portfolio/history", methods=["GET"])
+def portfolio_history():
+    """Historial de snapshots diarios del portfolio (para gráficos de evolución)."""
+    try:
+        days = int(request.args.get("days", 90))
+    except ValueError:
+        days = 90
+    snapshots = db.get_snapshots(days)
+    return jsonify({"snapshots": snapshots, "count": len(snapshots)})
 
 
 # ── Market Data ──────────────────────────────────────────────────────────────

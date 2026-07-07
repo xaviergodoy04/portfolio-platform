@@ -1,30 +1,35 @@
 """
 Módulo de alertas de precio.
-Las alertas se persisten en data/alerts.json
+Las alertas se persisten en SQLite (data/portfolio.db, tabla `alerts`).
+El JSON legacy (data/alerts.json) se migra automáticamente en db.init_db().
 """
-import json
-import os
 from datetime import datetime
 
-
-ALERTS_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "alerts.json")
-
-
-def _load_alerts() -> list:
-    if not os.path.exists(ALERTS_FILE):
-        return []
-    with open(ALERTS_FILE, "r") as f:
-        return json.load(f)
+from modules import db
 
 
-def _save_alerts(alerts: list):
-    os.makedirs(os.path.dirname(ALERTS_FILE), exist_ok=True)
-    with open(ALERTS_FILE, "w") as f:
-        json.dump(alerts, f, indent=2)
+def _row_to_alert(row) -> dict:
+    """Convierte una fila de la tabla `alerts` al dict que espera el frontend."""
+    return {
+        "id": row["id"],
+        "symbol": row["symbol"],
+        "alert_type": row["alert_type"],
+        "condition": row["condition"],
+        "target_price": row["target_price"],
+        "pct_change": row["pct_change"],
+        "reference_price": row["reference_price"],
+        "note": row["note"] or "",
+        "created_at": row["created_at"],
+        "triggered": bool(row["triggered"]),
+        "triggered_at": row["triggered_at"],
+        "triggered_price": row["triggered_price"],
+    }
 
 
 def get_alerts() -> list:
-    return _load_alerts()
+    with db.db_conn() as conn:
+        rows = conn.execute("SELECT * FROM alerts ORDER BY id ASC").fetchall()
+    return [_row_to_alert(r) for r in rows]
 
 
 def create_alert(symbol: str, condition: str, target_price: float, note: str = "",
@@ -36,7 +41,6 @@ def create_alert(symbol: str, condition: str, target_price: float, note: str = "
       - "price"    : dispara cuando precio cruza target_price (condition: above/below)
       - "pct_drop" : dispara cuando precio baja pct_change% desde reference_price
     """
-    alerts = _load_alerts()
     alert = {
         "id": int(datetime.now().timestamp() * 1000),
         "symbol": symbol.upper(),
@@ -51,8 +55,18 @@ def create_alert(symbol: str, condition: str, target_price: float, note: str = "
         "triggered_at": None,
         "triggered_price": None,
     }
-    alerts.append(alert)
-    _save_alerts(alerts)
+    with db.db_conn() as conn:
+        conn.execute(
+            """INSERT INTO alerts
+               (id, symbol, alert_type, condition, target_price, pct_change,
+                reference_price, note, triggered, triggered_at, triggered_price, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?)""",
+            (
+                alert["id"], alert["symbol"], alert["alert_type"], alert["condition"],
+                alert["target_price"], alert["pct_change"], alert["reference_price"],
+                alert["note"], alert["created_at"],
+            ),
+        )
     return alert
 
 
@@ -77,11 +91,9 @@ def create_pct_alert(symbol: str, pct: float, reference_price: float,
 
 
 def delete_alert(alert_id: int) -> bool:
-    alerts = _load_alerts()
-    initial_len = len(alerts)
-    alerts = [a for a in alerts if a["id"] != alert_id]
-    _save_alerts(alerts)
-    return len(alerts) < initial_len
+    with db.db_conn() as conn:
+        cur = conn.execute("DELETE FROM alerts WHERE id = ?", (alert_id,))
+    return cur.rowcount > 0
 
 
 def check_alerts(current_prices: dict) -> list:
@@ -89,29 +101,30 @@ def check_alerts(current_prices: dict) -> list:
     Verifica cuáles alertas se dispararon dado un dict {symbol: price}.
     Retorna lista de alertas disparadas.
     """
-    alerts = _load_alerts()
     triggered = []
+    with db.db_conn() as conn:
+        rows = conn.execute("SELECT * FROM alerts WHERE triggered = 0 ORDER BY id ASC").fetchall()
+        for row in rows:
+            price = current_prices.get(row["symbol"])
+            if price is None:
+                continue
 
-    for alert in alerts:
-        if alert["triggered"]:
-            continue
+            fired = False
+            if row["condition"] == "above" and price >= row["target_price"]:
+                fired = True
+            elif row["condition"] == "below" and price <= row["target_price"]:
+                fired = True
 
-        symbol = alert["symbol"]
-        price = current_prices.get(symbol)
-        if price is None:
-            continue
+            if fired:
+                now = datetime.now().isoformat()
+                conn.execute(
+                    "UPDATE alerts SET triggered = 1, triggered_at = ?, triggered_price = ? WHERE id = ?",
+                    (now, price, row["id"]),
+                )
+                alert = _row_to_alert(row)
+                alert["triggered"] = True
+                alert["triggered_at"] = now
+                alert["triggered_price"] = price
+                triggered.append(alert)
 
-        fired = False
-        if alert["condition"] == "above" and price >= alert["target_price"]:
-            fired = True
-        elif alert["condition"] == "below" and price <= alert["target_price"]:
-            fired = True
-
-        if fired:
-            alert["triggered"] = True
-            alert["triggered_at"] = datetime.now().isoformat()
-            alert["triggered_price"] = price
-            triggered.append(alert)
-
-    _save_alerts(alerts)
     return triggered

@@ -26,6 +26,10 @@ CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
 MARKET_PROVIDER = os.getenv("MARKET_PROVIDER", "yfinance")
 
 # --- General ---
+# APP_HOST=0.0.0.0 expone la app en la red local (necesario para usarla desde
+# el celular). OJO: sin auth, cualquiera en tu Wi-Fi puede verla — usá
+# 127.0.0.1 si estás en una red compartida/pública.
+APP_HOST = os.getenv("APP_HOST", "0.0.0.0")
 APP_PORT = int(os.getenv("APP_PORT", "5000"))
 DEBUG_MODE = os.getenv("DEBUG_MODE", "true").lower() == "true"
 BASE_CURRENCY = os.getenv("BASE_CURRENCY", "USD")

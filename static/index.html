@@ -2,8 +2,16 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Portfolio IB — Dashboard</title>
+  <!-- PWA: instalable en el home screen del teléfono -->
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#0a0a0a">
+  <link rel="icon" type="image/png" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Portfolio">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -393,13 +401,45 @@
       .grid-4 { grid-template-columns: repeat(2, 1fr); }
       .grid-3 { grid-template-columns: 1fr 1fr; }
     }
+    /* Teléfono: el sidebar pasa a tab bar inferior (patrón nativo de app) */
     @media (max-width: 600px) {
-      .sidebar { width: 64px; }
-      .sidebar-logo span:not(.logo-badge), .nav-item span { display: none; }
-      .sidebar-version { display: none; }
-      .main { margin-left: 64px; padding: 16px; }
+      .sidebar {
+        width: 100vw;
+        height: auto;
+        top: auto;
+        bottom: 0;
+        display: flex;
+        flex-direction: row;
+        justify-content: space-around;
+        align-items: stretch;
+        padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+        border-right: none;
+        border-top: 1px solid var(--border-soft);
+        overflow: visible;
+      }
+      .sidebar-logo, .sidebar-version { display: none; }
+      .nav-item {
+        position: relative;
+        flex: 1;
+        flex-direction: column;
+        justify-content: center;
+        gap: 3px;
+        margin: 0 2px;
+        padding: 7px 2px;
+        font-size: 10px;
+        text-align: center;
+      }
+      .nav-item #smart-badge { position: absolute; top: 2px; right: 16%; margin-left: 0; }
+      .main {
+        margin-left: 0;
+        max-width: 100vw;
+        padding: 16px 14px calc(88px + env(safe-area-inset-bottom));
+      }
       .grid-4, .grid-2, .grid-3 { grid-template-columns: 1fr; }
       .chat-panel { width: 100vw; }
+      .chat-fab { bottom: calc(76px + env(safe-area-inset-bottom)); }
+      #toast { bottom: calc(140px + env(safe-area-inset-bottom)); left: 20px; }
+      .page-title { font-size: 20px; }
     }
 
     /* ── Noticias ── */
@@ -1136,6 +1176,11 @@
         </div>
 
         <div class="card">
+          <div class="card-title">📱 Usar en el celular</div>
+          <div id="mobile-info"><div class="loading-overlay" style="padding:12px"><div class="spinner"></div> Detectando red...</div></div>
+        </div>
+
+        <div class="card">
           <div class="card-title">📊 Uso de la plataforma</div>
           <p style="color:var(--text-muted);margin-bottom:12px;line-height:1.6">
             Soporte de la revisión mensual: requests por endpoint, actividad diaria y feedback de noticias.
@@ -1320,7 +1365,7 @@ function navigate(page) {
   if (page === 'alertas') { loadAlerts(); loadSmartHistory(); pollUnseenBadge(); }
   // Noticias: carga automática solo si no hay datos aún (usa caché)
   if (page === 'news' && newsTotal() === 0) loadNews(false);
-  if (page === 'setup') { loadSystemHealth(); loadUsageStats(); loadAIStatus(); loadFeedHealth(); }
+  if (page === 'setup') { loadSystemHealth(); loadUsageStats(); loadAIStatus(); loadFeedHealth(); loadMobileInfo(); }
   window.scrollTo(0, 0);
 }
 
@@ -3194,6 +3239,41 @@ async function loadUsageStats() {
   }
 }
 
+// ── Ajustes: acceso desde el celular (PWA) ────────────────────────────────────
+async function loadMobileInfo() {
+  const el = document.getElementById('mobile-info');
+  try {
+    const info = await (await fetch('/api/mobile-info')).json();
+    if (!info.lan_enabled) {
+      el.innerHTML = `<div style="font-size:13px;color:var(--text-muted);line-height:1.6">
+        El server está escuchando solo en <code>${info.host}</code> — para usarlo desde el celular
+        poné <code>APP_HOST=0.0.0.0</code> en el <code>.env</code> y reiniciá.</div>`;
+      return;
+    }
+    if (!info.lan_url) {
+      el.innerHTML = '<div style="font-size:13px;color:var(--yellow)">⚠️ No se pudo detectar la IP local — ¿estás conectado a la red?</div>';
+      return;
+    }
+    el.innerHTML = `
+      <p style="color:var(--text-muted);margin-bottom:10px;line-height:1.6;font-size:13px">
+        Con el celular en <strong style="color:var(--text)">la misma red Wi-Fi</strong>, abrí esta dirección:
+      </p>
+      <div style="background:var(--surface2);border-radius:8px;padding:12px;text-align:center;margin-bottom:12px">
+        <a href="${info.lan_url}" style="font-family:var(--mono);font-size:17px;color:var(--accent);text-decoration:none">${info.lan_url}</a>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);line-height:1.8">
+        <strong style="color:var(--text)">Para instalarla como app:</strong><br>
+        🍎 iPhone: Safari → botón Compartir → <em>Agregar a pantalla de inicio</em><br>
+        🤖 Android: Chrome → menú ⋮ → <em>Agregar a pantalla principal</em>
+      </div>
+      <div style="margin-top:12px;padding:10px 12px;background:var(--surface2);border-radius:8px;font-size:11px;color:var(--text-muted);line-height:1.6">
+        ⚠️ Sin login: cualquiera en tu Wi-Fi puede abrir esa URL. Para usarla fuera de casa (y con HTTPS), la opción gratis recomendada es <strong style="color:var(--text)">Tailscale</strong> en la Mac y el teléfono.
+      </div>`;
+  } catch (e) {
+    el.innerHTML = '<div style="color:var(--yellow);font-size:13px">⚠️ No se pudo consultar la info de red.</div>';
+  }
+}
+
 // ── Ajustes: estado del proveedor IA ──────────────────────────────────────────
 async function loadAIStatus() {
   const el = document.getElementById('ai-status');
@@ -3337,6 +3417,12 @@ loadVersion();
 loadPortfolio();
 loadHoyExtras();
 initSmartAlerts();
+
+// PWA: el registro falla sin contexto seguro (HTTP de LAN) y no pasa nada —
+// la app sigue como web normal; con HTTPS o localhost queda instalable offline
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
 </script>
 </body>
 </html>

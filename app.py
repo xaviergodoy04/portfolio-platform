@@ -138,6 +138,36 @@ def index():
     return send_from_directory("static", "index.html")
 
 
+@app.route("/sw.js")
+def service_worker():
+    """El service worker se sirve desde la raíz para que su scope cubra
+    toda la app (desde /static/ solo controlaría /static/*)."""
+    return send_from_directory("static", "sw.js", mimetype="application/javascript")
+
+
+@app.route("/api/mobile-info")
+def mobile_info():
+    """IP LAN del server para armar la URL que se abre desde el celular."""
+    import socket
+    lan_ip = None
+    try:
+        # Truco estándar: un socket UDP "conectado" a una IP externa revela
+        # qué IP local usaría el sistema para salir — no manda ningún paquete
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        lan_ip = s.getsockname()[0]
+        s.close()
+    except Exception:
+        pass
+    lan_enabled = config.APP_HOST in ("0.0.0.0", "::")
+    return jsonify({
+        "lan_enabled": lan_enabled,
+        "lan_url": f"http://{lan_ip}:{config.APP_PORT}" if (lan_ip and lan_enabled) else None,
+        "host": config.APP_HOST,
+        "port": config.APP_PORT,
+    })
+
+
 # ── Portfolio / IBKR ─────────────────────────────────────────────────────────
 
 @app.route("/api/portfolio", methods=["GET"])
@@ -707,4 +737,6 @@ if __name__ == "__main__":
     if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not config.DEBUG_MODE:
         init_scheduler()
 
-    app.run(debug=config.DEBUG_MODE, port=config.APP_PORT)
+    if config.APP_HOST in ("0.0.0.0", "::"):
+        print("   📱 Accesible desde la red local (celular): ver Ajustes → Usar en el celular")
+    app.run(debug=config.DEBUG_MODE, host=config.APP_HOST, port=config.APP_PORT)

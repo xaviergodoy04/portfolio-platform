@@ -36,8 +36,18 @@
       --green: #4ade80;
       --red: #f87171;
       --yellow: #fbbf24;
-      --radius: 10px;
+      --radius: 14px;
+      --radius-lg: 20px;
       --mono: 'JetBrains Mono', ui-monospace, monospace;
+      /* Sistema premium: gradiente de firma, glass y tokens de movimiento */
+      --gradient-accent: linear-gradient(135deg, #a3e635 20%, #22d3ee 100%);
+      --glass-bg: rgba(12,14,10,0.55);
+      --glass-border: rgba(255,255,255,0.09);
+      --glow: 0 0 28px rgba(163,230,53,0.14);
+      --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+      --dur-micro: 180ms;
+      --dur-card: 450ms;
+      --dur-hero: 700ms;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -53,16 +63,58 @@
 
     @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
+    /* ── Aurora ambiental: 3 blobs de gradiente en drift lento (GPU-only) ── */
+    .aurora { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+    .aurora span { position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; will-change: transform; }
+    .aurora span:nth-child(1) { top: -32vmax; left: -22vmax; background: radial-gradient(circle, rgba(163,230,53,0.10), transparent 62%); animation: drift1 70s ease-in-out infinite alternate; }
+    .aurora span:nth-child(2) { bottom: -36vmax; right: -26vmax; background: radial-gradient(circle, rgba(34,211,238,0.08), transparent 62%); animation: drift2 90s ease-in-out infinite alternate; }
+    .aurora span:nth-child(3) { top: 18%; left: 38%; width: 55vmax; height: 55vmax; background: radial-gradient(circle, rgba(139,92,246,0.07), transparent 62%); animation: drift3 80s ease-in-out infinite alternate; }
+    @keyframes drift1 { to { transform: translate(14vmax, 9vmax) scale(1.15); } }
+    @keyframes drift2 { to { transform: translate(-11vmax, -10vmax) scale(1.1); } }
+    @keyframes drift3 { to { transform: translate(-15vmax, 11vmax) scale(0.88); } }
+
+    /* ── Glass real: solo superficies flotantes (backdrop-filter es caro) ── */
+    .glass {
+      background: var(--glass-bg);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      backdrop-filter: blur(20px) saturate(140%);
+      border: 1px solid var(--glass-border);
+    }
+
+    /* ── Entrance reveals (los dispara un IntersectionObserver) ──
+       Se usa animation (no transition) para no pisar las transitions de
+       hover de .card; backwards mantiene el estado inicial durante el
+       delay del stagger y suelta el control al terminar. */
+    .reveal { opacity: 0; }
+    .reveal.revealed {
+      opacity: 1;
+      animation: revealUp var(--dur-card) var(--ease-out) backwards;
+      animation-delay: calc(var(--i, 0) * 60ms);
+    }
+    @keyframes revealUp {
+      from { opacity: 0; transform: translateY(18px); }
+      to { opacity: 1; transform: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .aurora span { animation: none; }
+      .reveal { opacity: 1; }
+      .reveal.revealed { animation: none; }
+      .card, .btn { transition: none; }
+    }
+
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
 
     /* Layout */
-    .layout { display: flex; min-height: 100vh; }
+    .layout { display: flex; min-height: 100vh; position: relative; z-index: 1; }
 
     .sidebar {
       width: 220px;
-      background: var(--sidebar);
+      background: rgba(8,9,7,0.72);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      backdrop-filter: blur(20px) saturate(140%);
       border-right: 1px solid var(--border-soft);
       padding: 12px 0;
       flex-shrink: 0;
@@ -107,8 +159,21 @@
       transition: background 0.15s, color 0.15s;
     }
 
+    .nav-item { position: relative; }
     .nav-item:hover { background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.7); }
     .nav-item.active { background: var(--accent-soft); color: var(--accent); }
+    /* Indicador gradiente del ítem activo */
+    .nav-item::before {
+      content: '';
+      position: absolute;
+      left: -8px; top: 50%;
+      width: 3px; height: 0;
+      border-radius: 2px;
+      background: var(--gradient-accent);
+      transform: translateY(-50%);
+      transition: height var(--dur-micro) var(--ease-out);
+    }
+    .nav-item.active::before { height: 62%; }
 
     /* Versión del build corriendo, fija al pie del sidebar */
     .sidebar-version {
@@ -133,12 +198,36 @@
       max-width: calc(100vw - 220px);
     }
 
-    /* Cards */
+    /* Cards: cristal simulado (capas translúcidas, sin backdrop-filter) */
     .card {
-      background: var(--surface);
+      position: relative;
+      background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.015));
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 18px;
+      transition: transform var(--dur-micro) var(--ease-out),
+                  border-color var(--dur-micro) ease,
+                  box-shadow var(--dur-micro) ease;
+    }
+    /* Glow que sigue el puntero (coords --mx/--my las escribe JS; solo desktop) */
+    .card::after {
+      content: '';
+      position: absolute;
+      inset: -1px;
+      border-radius: inherit;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.35s ease;
+      background: radial-gradient(280px circle at var(--mx, 50%) var(--my, 50%),
+                  rgba(163,230,53,0.10), transparent 65%);
+    }
+    @media (hover: hover) {
+      .card:hover {
+        transform: translateY(-3px);
+        border-color: rgba(163,230,53,0.22);
+        box-shadow: 0 14px 36px rgba(0,0,0,0.45), var(--glow);
+      }
+      .card:hover::after { opacity: 1; }
     }
 
     .card-title {
@@ -207,18 +296,33 @@
 
     /* Buttons */
     .btn {
+      position: relative;
+      overflow: hidden;
       padding: 8px 14px;
-      border-radius: 8px;
+      border-radius: 10px;
       border: 1px solid transparent;
       cursor: pointer;
       font-size: 13px;
       font-weight: 600;
-      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      transition: background 0.15s, color 0.15s, border-color 0.15s,
+                  transform var(--dur-micro) var(--ease-out), box-shadow 0.2s;
     }
+    .btn:active { transform: scale(0.96); }
     .btn-primary { background: var(--accent); color: #0a0a0a; }
-    .btn-primary:hover { background: var(--accent-hover); }
+    /* Sheen que barre el botón primario en hover */
+    .btn-primary::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,0.38) 50%, transparent 70%);
+      transform: translateX(-130%);
+    }
+    @media (hover: hover) {
+      .btn-primary:hover { background: var(--accent-hover); box-shadow: 0 4px 18px rgba(163,230,53,0.35); }
+      .btn-primary:hover::after { transform: translateX(130%); transition: transform 600ms var(--ease-out); }
+    }
     .btn-outline { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
-    .btn-outline:hover { color: var(--text); border-color: rgba(255,255,255,0.18); }
+    .btn-outline:hover { color: var(--text); border-color: rgba(163,230,53,0.35); }
     .btn-sm { padding: 5px 10px; font-size: 12px; }
     .btn-danger { background: var(--red); color: #1a0000; }
     .btn-success { background: var(--green); color: #052e16; }
@@ -235,7 +339,7 @@
       width: 100%;
       font-family: inherit;
     }
-    input:focus, select:focus, textarea:focus { border-color: rgba(163,230,53,0.4); }
+    input:focus, select:focus, textarea:focus { border-color: rgba(163,230,53,0.4); box-shadow: 0 0 0 3px rgba(163,230,53,0.08); }
     input::placeholder, textarea::placeholder { color: var(--text-faint); }
     textarea { resize: vertical; min-height: 80px; }
 
@@ -294,7 +398,9 @@
       height: 100vh;
       width: 400px;
       max-width: 100vw;
-      background: var(--sidebar);
+      background: rgba(8,9,7,0.78);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      backdrop-filter: blur(20px) saturate(140%);
       border-left: 1px solid var(--border);
       z-index: 1200;
       display: flex;
@@ -388,11 +494,76 @@
     /* Toast (arriba de la burbuja del chat) */
     #toast {
       position: fixed; bottom: 90px; right: 20px;
-      background: var(--surface2); border: 1px solid var(--border);
-      color: var(--text); padding: 12px 20px; border-radius: 10px;
+      background: var(--glass-bg);
+      -webkit-backdrop-filter: blur(16px) saturate(140%);
+      backdrop-filter: blur(16px) saturate(140%);
+      border: 1px solid var(--glass-border);
+      color: var(--text); padding: 12px 20px; border-radius: 12px;
       font-size: 13px; z-index: 9999; display: none;
       box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      animation: fadeUp 0.3s var(--ease-out) both;
     }
+
+    /* ── Bento grid (página Hoy) ── */
+    .bento {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      grid-template-areas:
+        "hero hero pnl  pos"
+        "hero hero upd  upd";
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .bento-cell-hero { grid-area: hero; }
+    .bento-cell-pnl { grid-area: pnl; }
+    .bento-cell-pos { grid-area: pos; }
+    .bento-cell-upd { grid-area: upd; }
+
+    .bento-2 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .bento-span-2 { grid-column: span 2; }
+    .bento-span-4 { grid-column: span 4; }
+
+    /* Hero: glass real + glow pulsante + valor en gradiente */
+    .bento-hero {
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 190px;
+    }
+    .bento-hero::before {
+      content: '';
+      position: absolute;
+      width: 130%; height: 130%;
+      top: -40%; right: -50%;
+      background: radial-gradient(circle, rgba(163,230,53,0.13), rgba(34,211,238,0.05) 45%, transparent 68%);
+      animation: heroPulse 8s ease-in-out infinite;
+      pointer-events: none;
+    }
+    @keyframes heroPulse {
+      0%, 100% { opacity: 0.7; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.12); }
+    }
+    .hero-value {
+      font-family: var(--mono);
+      font-size: clamp(38px, 5vw, 58px);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.05;
+      background: var(--gradient-accent);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+      margin: 6px 0 8px;
+    }
+    @media (prefers-reduced-motion: reduce) { .bento-hero::before { animation: none; } }
 
     .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
 
@@ -400,6 +571,15 @@
     @media (max-width: 900px) {
       .grid-4 { grid-template-columns: repeat(2, 1fr); }
       .grid-3 { grid-template-columns: 1fr 1fr; }
+      .bento {
+        grid-template-columns: 1fr 1fr;
+        grid-template-areas:
+          "hero hero"
+          "pnl  pos"
+          "upd  upd";
+      }
+      .bento-2 { grid-template-columns: 1fr 1fr; }
+      .bento-span-2, .bento-span-4 { grid-column: span 2; }
     }
     /* Teléfono: el sidebar pasa a tab bar inferior (patrón nativo de app) */
     @media (max-width: 600px) {
@@ -430,6 +610,15 @@
         text-align: center;
       }
       .nav-item #smart-badge { position: absolute; top: 2px; right: 16%; margin-left: 0; }
+      /* El indicador activo pasa de barra lateral a barra superior del tab */
+      .nav-item::before {
+        left: 26%; right: 26%; top: -7px;
+        width: auto; height: 3px;
+        transform: none;
+        transition: opacity var(--dur-micro) ease;
+        opacity: 0;
+      }
+      .nav-item.active::before { height: 3px; opacity: 1; }
       .main {
         margin-left: 0;
         max-width: 100vw;
@@ -669,6 +858,8 @@
 </head>
 <body>
 
+<div class="aurora" aria-hidden="true"><span></span><span></span><span></span></div>
+
 <div class="layout">
   <!-- Sidebar: 5 secciones -->
   <nav class="sidebar">
@@ -692,25 +883,35 @@
         <button class="btn btn-outline btn-sm" onclick="loadPortfolio(true)">↻ Actualizar</button>
       </div>
 
-      <div class="grid-4" id="portfolio-metrics">
-        <div class="card"><div class="card-title">Valor Total</div><div class="metric-value" id="m-total">—</div><div class="metric-sub">Portafolio</div></div>
-        <div class="card"><div class="card-title">P&L No Realizado</div><div class="metric-value" id="m-pnl">—</div><div class="metric-sub" id="m-pnl-pct">—</div></div>
-        <div class="card"><div class="card-title">Posiciones</div><div class="metric-value" id="m-positions">—</div><div class="metric-sub">activos</div></div>
-        <div class="card"><div class="card-title">Última actualización</div><div class="metric-value" style="font-size:16px" id="m-updated">—</div><div class="metric-sub">—</div></div>
+      <div class="bento" id="portfolio-metrics">
+        <div class="card glass bento-hero bento-cell-hero">
+          <div class="card-title">Valor total del portafolio</div>
+          <div class="hero-value" id="m-total">—</div>
+          <div class="metric-sub">Portafolio consolidado</div>
+        </div>
+        <div class="card bento-cell-pnl"><div class="card-title">P&L No Realizado</div><div class="metric-value" id="m-pnl">—</div><div class="metric-sub" id="m-pnl-pct">—</div></div>
+        <div class="card bento-cell-pos"><div class="card-title">Posiciones</div><div class="metric-value" id="m-positions">—</div><div class="metric-sub">activos</div></div>
+        <div class="card bento-cell-upd"><div class="card-title">Última actualización</div><div class="metric-value" style="font-size:16px" id="m-updated">—</div><div class="metric-sub">—</div></div>
       </div>
 
-      <!-- Evolución del portfolio -->
-      <div class="card" style="margin-bottom:20px">
-        <div class="section-header">
-          <div class="card-title" style="margin:0">Evolución del portfolio</div>
-          <div style="display:flex;gap:6px">
-            <button id="evo-btn-30" class="btn btn-outline btn-sm" onclick="setEvoRange(30)">30d</button>
-            <button id="evo-btn-90" class="btn btn-primary btn-sm" onclick="setEvoRange(90)">90d</button>
-            <button id="evo-btn-365" class="btn btn-outline btn-sm" onclick="setEvoRange(365)">1 año</button>
+      <!-- Evolución + distribución (fila bento) -->
+      <div class="bento-2">
+        <div class="card bento-span-2">
+          <div class="section-header">
+            <div class="card-title" style="margin:0">Evolución del portfolio</div>
+            <div style="display:flex;gap:6px">
+              <button id="evo-btn-30" class="btn btn-outline btn-sm" onclick="setEvoRange(30)">30d</button>
+              <button id="evo-btn-90" class="btn btn-primary btn-sm" onclick="setEvoRange(90)">90d</button>
+              <button id="evo-btn-365" class="btn btn-outline btn-sm" onclick="setEvoRange(365)">1 año</button>
+            </div>
           </div>
+          <div id="evolution-msg" style="display:none;text-align:center;padding:32px 20px;color:var(--text-muted);line-height:1.6"></div>
+          <div id="evolution-wrap"><canvas id="chart-evolution" height="110"></canvas></div>
         </div>
-        <div id="evolution-msg" style="display:none;text-align:center;padding:32px 20px;color:var(--text-muted);line-height:1.6"></div>
-        <div id="evolution-wrap"><canvas id="chart-evolution" height="80"></canvas></div>
+        <div class="card bento-span-2">
+          <div class="card-title">Distribución por posición</div>
+          <canvas id="chart-allocation" height="110"></canvas>
+        </div>
       </div>
 
       <!-- Smart alerts sin ver -->
@@ -735,22 +936,22 @@
         </div>
       </div>
 
-      <!-- Watchlist -->
-      <div class="card" style="margin-bottom:20px">
-        <div class="section-header">
-          <div class="card-title" style="margin:0">⭐ Watchlist</div>
-          <button class="btn btn-outline btn-sm" onclick="navigate('explorar')">Explorar →</button>
+      <!-- Watchlist + noticias de tus activos (fila bento) -->
+      <div class="bento-2">
+        <div class="card bento-span-2">
+          <div class="section-header">
+            <div class="card-title" style="margin:0">⭐ Watchlist</div>
+            <button class="btn btn-outline btn-sm" onclick="navigate('explorar')">Explorar →</button>
+          </div>
+          <div id="hoy-watchlist"><div style="padding:8px 0;color:var(--text-muted);font-size:13px">Marcá activos con ⭐ desde Explorar.</div></div>
         </div>
-        <div id="hoy-watchlist"><div style="padding:8px 0;color:var(--text-muted);font-size:13px">Marcá activos con ⭐ desde Explorar.</div></div>
-      </div>
-
-      <!-- Noticias de tus activos (portfolio + watchlist) -->
-      <div class="card" style="margin-bottom:20px">
-        <div class="section-header">
-          <div class="card-title" style="margin:0">⭐ Noticias de tus activos</div>
-          <button class="btn btn-outline btn-sm" onclick="navigate('news')">Ver todas →</button>
+        <div class="card bento-span-2">
+          <div class="section-header">
+            <div class="card-title" style="margin:0">⭐ Noticias de tus activos</div>
+            <button class="btn btn-outline btn-sm" onclick="navigate('news')">Ver todas →</button>
+          </div>
+          <div id="hoy-news-list"><div class="loading-overlay" style="padding:20px"><div class="spinner"></div> Buscando noticias...</div></div>
         </div>
-        <div id="hoy-news-list"><div class="loading-overlay" style="padding:20px"><div class="spinner"></div> Buscando noticias...</div></div>
       </div>
 
       <!-- Posiciones -->
@@ -766,11 +967,6 @@
           </div>
         </div>
         <div id="positions-table"><div class="loading-overlay"><div class="spinner"></div> Cargando portfolio...</div></div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">Distribución por posición</div>
-        <canvas id="chart-allocation" height="80"></canvas>
       </div>
     </div>
 
@@ -1297,7 +1493,7 @@
 
 <!-- Manual position modal -->
 <div id="manual-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center">
-  <div class="card" style="width:500px;max-width:90vw;max-height:80vh;overflow-y:auto">
+  <div class="card glass" style="width:500px;max-width:90vw;max-height:80vh;overflow-y:auto">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
       <strong>Agregar posición manual</strong>
       <button onclick="closeManualModal()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px">✕</button>
@@ -1341,6 +1537,51 @@
 
 <script>
 const API = '';
+
+// ── Chart.js: defaults premium (tooltips dark, tipografía del sistema) ──────
+if (window.Chart) {
+  Chart.defaults.font.family = "'DM Sans', system-ui, sans-serif";
+  Object.assign(Chart.defaults.plugins.tooltip, {
+    backgroundColor: 'rgba(8,10,6,0.92)',
+    borderColor: 'rgba(163,230,53,0.25)',
+    borderWidth: 1,
+    padding: 10,
+    cornerRadius: 10,
+    titleColor: '#ffffff',
+    bodyColor: 'rgba(255,255,255,0.75)',
+    displayColors: false,
+  });
+}
+
+// Relleno con gradiente vertical para line charts (color → transparente)
+function chartGradient(ctx, rgb, alpha = 0.25) {
+  const h = (ctx.canvas && ctx.canvas.clientHeight) || 240;
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, `rgba(${rgb},${alpha})`);
+  g.addColorStop(1, `rgba(${rgb},0)`);
+  return g;
+}
+
+// Count-up con easing para los números del hero (respeta reduced-motion)
+function countUp(el, value, fmtFn, dur = 900) {
+  if (value == null || isNaN(value) ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    el.textContent = fmtFn(value);
+    el._countVal = Number(value) || 0;
+    return;
+  }
+  const from = el._countVal || 0;
+  el._countVal = Number(value);
+  const start = performance.now();
+  const step = (t) => {
+    const p = Math.min(1, (t - start) / dur);
+    const e = 1 - Math.pow(1 - p, 3);
+    el.textContent = fmtFn(from + (Number(value) - from) * e);
+    if (p < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 let portfolioData = null;
 // Estado global de la watchlist: se carga al inicio y tras cada toggle,
 // así las estrellas de radar/detalle se pintan sin un fetch por fila.
@@ -1366,7 +1607,51 @@ function navigate(page) {
   // Noticias: carga automática solo si no hay datos aún (usa caché)
   if (page === 'news' && newsTotal() === 0) loadNews(false);
   if (page === 'setup') { loadSystemHealth(); loadUsageStats(); loadAIStatus(); loadFeedHealth(); loadMobileInfo(); }
+  replayReveals(document.getElementById(`page-${page}`));
   window.scrollTo(0, 0);
+}
+
+// ── Entrance reveals: las tarjetas entran con fade+desplazamiento al verse ────
+const _revealObserver = ('IntersectionObserver' in window)
+  ? new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        if (en.isIntersecting) {
+          en.target.classList.add('revealed');
+          _revealObserver.unobserve(en.target);
+        }
+      }
+    }, { threshold: 0.06 })
+  : null;
+
+function initReveals() {
+  if (!_revealObserver) return;  // sin IO no se marca .reveal: nada queda oculto
+  document.querySelectorAll('.page').forEach(page => {
+    page.querySelectorAll('.card').forEach((el, i) => {
+      el.classList.add('reveal');
+      el.style.setProperty('--i', Math.min(i, 6));  // stagger, tope 360ms
+      _revealObserver.observe(el);
+    });
+  });
+}
+
+function replayReveals(page) {
+  // Re-dispara la entrada de las tarjetas de la página a la que se navega
+  if (!_revealObserver || !page) return;
+  page.querySelectorAll('.reveal.revealed').forEach(el => {
+    el.classList.remove('revealed');
+    _revealObserver.observe(el);
+  });
+}
+
+// ── Glow que sigue el puntero en las tarjetas (solo dispositivos con hover) ──
+if (window.matchMedia('(hover: hover)').matches) {
+  document.addEventListener('pointermove', (e) => {
+    const card = e.target.closest && e.target.closest('.card');
+    if (!card) return;
+    const r = card.getBoundingClientRect();
+    card.style.setProperty('--mx', ((e.clientX - r.left) / r.width * 100).toFixed(1) + '%');
+    card.style.setProperty('--my', ((e.clientY - r.top) / r.height * 100).toFixed(1) + '%');
+  }, { passive: true });
 }
 
 function showToast(msg, duration = 3000) {
@@ -1435,10 +1720,10 @@ function renderPortfolio(data) {
   }
 
   const s = data.summary || {};
-  document.getElementById('m-total').textContent = fmtMoney(s.total_value);
+  countUp(document.getElementById('m-total'), s.total_value, fmtMoney);
   const pnlEl = document.getElementById('m-pnl');
   pnlEl.innerHTML = fmtPct(s.total_pnl_pct);
-  document.getElementById('m-pnl-pct').textContent = fmtMoney(s.total_unrealized_pnl);
+  countUp(document.getElementById('m-pnl-pct'), s.total_unrealized_pnl, fmtMoney);
   document.getElementById('m-positions').textContent = s.num_positions || 0;
   document.getElementById('m-updated').textContent = s.as_of ? new Date(s.as_of).toLocaleTimeString('es-AR') : '—';
 
@@ -1494,17 +1779,24 @@ function renderAllocationChart(positions) {
   const labels = positions.map(p => p.symbol);
   const values = positions.map(p => ((p.position_value || 0) / total * 100).toFixed(1));
 
-  const colors = ['#a3e635','#22d3ee','#fb923c','#e879f9','#60a5fa','#4ade80','#fbbf24','#f87171','#a78bfa','#38bdf8'];
+  // Orden validado para visión de color (ΔE adyacente mínimo 25.3, modo dark)
+  const colors = ['#a3e635','#38bdf8','#fb923c','#e879f9','#4ade80','#fbbf24','#60a5fa','#f87171','#22d3ee','#a78bfa'];
 
   allocationChart = new Chart(ctx, {
     type: 'doughnut',
     data: {
       labels,
-      datasets: [{ data: values, backgroundColor: colors.slice(0, labels.length), borderWidth: 0 }]
+      datasets: [{
+        data: values,
+        backgroundColor: colors.slice(0, labels.length),
+        // Gap de 2px entre segmentos (separación que no depende del color)
+        borderWidth: 2,
+        borderColor: '#040404',
+      }]
     },
     options: {
-      responsive: true, plugins: {
-        legend: { position: 'right', labels: { color: 'rgba(255,255,255,0.6)', font: { size: 12 } } },
+      responsive: true, cutout: '68%', plugins: {
+        legend: { position: 'right', labels: { color: 'rgba(255,255,255,0.6)', font: { size: 12 }, boxWidth: 10, boxHeight: 10 } },
         tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw}%` } }
       }
     }
@@ -1553,10 +1845,12 @@ async function loadEvolution() {
           label: 'Valor total',
           data: snaps.map(s => s.total_value),
           borderColor: '#a3e635',
-          backgroundColor: 'rgba(163,230,53,0.07)',
+          backgroundColor: chartGradient(ctx, '163,230,53'),
           fill: true,
           borderWidth: 2,
           pointRadius: 0,
+          pointHoverRadius: 4,
+          pointHoverBackgroundColor: '#a3e635',
           tension: 0.25,
         }]
       },
@@ -1899,10 +2193,11 @@ async function loadDetailChart() {
           label: symbol,
           data: h.close,
           borderColor: up ? '#4ade80' : '#f87171',
-          backgroundColor: up ? 'rgba(74,222,128,0.06)' : 'rgba(248,113,113,0.06)',
+          backgroundColor: chartGradient(ctx, up ? '74,222,128' : '248,113,113', 0.18),
           fill: true,
           borderWidth: 2,
           pointRadius: 0,
+          pointHoverRadius: 4,
           tension: 0.2,
         }]
       },
@@ -3413,6 +3708,7 @@ async function sendChat() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.getElementById('chat-messages').innerHTML = CHAT_GREETING;
+initReveals();
 loadVersion();
 loadPortfolio();
 loadHoyExtras();

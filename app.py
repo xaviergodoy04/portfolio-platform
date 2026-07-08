@@ -31,6 +31,8 @@ from modules.smart_alerts import (
 )
 from modules.scheduler import init_scheduler, pop_pending_triggered
 from modules.track_record import get_track_record
+from modules.version import get_version
+from modules.health import get_health
 import asyncio
 import time
 from modules import db
@@ -114,6 +116,19 @@ def usage_stats():
     except ValueError:
         days = 30
     return jsonify(db.get_usage_stats(days))
+
+
+@app.route("/api/version")
+def version():
+    """Versión del build corriendo (git hash + branch) y hora de arranque.
+    Para saber de un vistazo si el server es el código que creés que es."""
+    return jsonify(get_version())
+
+
+@app.route("/api/health")
+def system_health():
+    """Semáforo de las dependencias críticas: mercado, IA, feeds y scheduler."""
+    return jsonify(get_health())
 
 
 # ── Servir el frontend ───────────────────────────────────────────────────────
@@ -678,6 +693,7 @@ def news_feedback_stats():
 
 if __name__ == "__main__":
     print(f"🚀 Plataforma de inversiones corriendo en http://localhost:{config.APP_PORT}")
+    print(f"   Versión: {get_version()['label']}")
     print(f"   IBKR Flex Query: {'✅ configurado' if config.IBKR_FLEX_TOKEN != 'TU_TOKEN_FLEX_QUERY_AQUI' else '⚠️  no configurado'}")
     groq_ok = config.GROQ_API_KEY != "TU_GROQ_API_KEY_AQUI"
     anthropic_ok = config.ANTHROPIC_API_KEY != "TU_ANTHROPIC_API_KEY_AQUI"

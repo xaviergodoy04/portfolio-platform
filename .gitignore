@@ -19,3 +19,6 @@ data/backups/
 
 # Logs del servicio launchd
 data/logs/
+
+# Cache de noticias (runtime, se regenera solo)
+data/news_cache.json

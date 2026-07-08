@@ -102,6 +102,22 @@
     .nav-item:hover { background: rgba(255,255,255,0.03); color: rgba(255,255,255,0.7); }
     .nav-item.active { background: var(--accent-soft); color: var(--accent); }
 
+    /* Versión del build corriendo, fija al pie del sidebar */
+    .sidebar-version {
+      position: fixed;
+      bottom: 0;
+      width: 220px;
+      padding: 10px 18px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-faint);
+      background: var(--sidebar);
+      border-top: 1px solid var(--border-soft);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     .main {
       margin-left: 220px;
       flex: 1;
@@ -380,6 +396,7 @@
     @media (max-width: 600px) {
       .sidebar { width: 64px; }
       .sidebar-logo span:not(.logo-badge), .nav-item span { display: none; }
+      .sidebar-version { display: none; }
       .main { margin-left: 64px; padding: 16px; }
       .grid-4, .grid-2, .grid-3 { grid-template-columns: 1fr; }
       .chat-panel { width: 100vw; }
@@ -624,6 +641,7 @@
     </div>
     <div class="nav-item" id="nav-news" onclick="navigate('news')">📰 <span>Noticias</span></div>
     <div class="nav-item" id="nav-setup" onclick="navigate('setup')">⚙️ <span>Ajustes</span></div>
+    <div class="sidebar-version" id="sidebar-version" title="Versión del server corriendo">…</div>
   </nav>
 
   <main class="main">
@@ -1106,6 +1124,26 @@
 
       <div class="grid-2">
         <div class="card">
+          <div class="card-title">🩺 Salud del sistema</div>
+          <p style="color:var(--text-muted);margin-bottom:12px;line-height:1.6">
+            Semáforo de las dependencias críticas: datos de mercado, proveedor IA, fuentes de noticias y scheduler interno.
+          </p>
+          <div id="system-health"><div class="loading-overlay" style="padding:12px"><div class="spinner"></div> Chequeando dependencias...</div></div>
+          <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button id="btn-system-health" class="btn btn-outline btn-sm" onclick="loadSystemHealth()">🔄 Chequear ahora</button>
+            <span id="system-version" style="font-family:var(--mono);font-size:11px;color:var(--text-faint)"></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">📊 Uso de la plataforma</div>
+          <p style="color:var(--text-muted);margin-bottom:12px;line-height:1.6">
+            Soporte de la revisión mensual: requests por endpoint, actividad diaria y feedback de noticias.
+          </p>
+          <div id="usage-stats"><div class="loading-overlay" style="padding:12px"><div class="spinner"></div> Cargando estadísticas...</div></div>
+        </div>
+
+        <div class="card">
           <div class="card-title">📂 Cargar portfolio</div>
           <p style="color:var(--text-muted);margin-bottom:16px;line-height:1.6">
             Traé tus posiciones desde IBKR (Flex Query), subí un CSV exportado del Activity Statement o cargalas a mano.
@@ -1282,7 +1320,7 @@ function navigate(page) {
   if (page === 'alertas') { loadAlerts(); loadSmartHistory(); pollUnseenBadge(); }
   // Noticias: carga automática solo si no hay datos aún (usa caché)
   if (page === 'news' && newsTotal() === 0) loadNews(false);
-  if (page === 'setup') { loadAIStatus(); loadFeedHealth(); }
+  if (page === 'setup') { loadSystemHealth(); loadUsageStats(); loadAIStatus(); loadFeedHealth(); }
   window.scrollTo(0, 0);
 }
 
@@ -3066,6 +3104,96 @@ async function loadNews(forceRefresh = false) {
   }
 }
 
+// ── Versión del build (sidebar + Ajustes) ─────────────────────────────────────
+async function loadVersion() {
+  try {
+    const v = await (await fetch('/api/version')).json();
+    const started = v.started_at ? v.started_at.replace('T', ' ').slice(0, 16) : '—';
+    document.getElementById('sidebar-version').textContent = v.label;
+    document.getElementById('sidebar-version').title =
+      `Versión del server corriendo\nCommit: ${v.git_commit_date || '?'}\nArrancado: ${started}${v.dirty ? '\n* con cambios sin commitear' : ''}`;
+    const el = document.getElementById('system-version');
+    if (el) el.textContent = `${v.label} · arrancado ${started}`;
+  } catch (e) {
+    document.getElementById('sidebar-version').textContent = '⚠️ sin conexión al server';
+  }
+}
+
+// ── Ajustes: salud del sistema (semáforo de dependencias) ─────────────────────
+async function loadSystemHealth() {
+  const el = document.getElementById('system-health');
+  const btn = document.getElementById('btn-system-health');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Chequeando...'; }
+  el.innerHTML = '<div class="loading-overlay" style="padding:12px"><div class="spinner"></div> Chequeando dependencias...</div>';
+  try {
+    const h = await (await fetch('/api/health')).json();
+    const ICONS = { ok: '🟢', degraded: '🟡', down: '🔴' };
+    const LABELS = { ok: 'todo OK', degraded: 'con degradaciones', down: 'con caídas' };
+    const rows = Object.values(h.checks || {}).map(c => `
+      <div style="display:flex;gap:8px;align-items:baseline;padding:5px 0;border-bottom:1px solid var(--border-soft)">
+        <span>${ICONS[c.status] || '⚪'}</span>
+        <strong style="font-size:13px;white-space:nowrap">${c.name}</strong>
+        <span style="font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(c.detail || '').replace(/"/g, '&quot;')}">${c.detail || ''}</span>
+      </div>`).join('');
+    el.innerHTML = `
+      <div style="font-size:13px;margin-bottom:6px">${ICONS[h.overall] || '⚪'} Estado general:
+        <strong style="color:${h.overall === 'ok' ? 'var(--green)' : h.overall === 'degraded' ? 'var(--yellow)' : 'var(--red)'}">${LABELS[h.overall] || h.overall}</strong>
+        <span style="color:var(--text-faint);font-size:11px;font-family:var(--mono)"> · ${(h.checked_at || '').replace('T', ' ').slice(0, 16)}</span>
+      </div>${rows}`;
+  } catch (e) {
+    console.error(e);
+    el.innerHTML = '<div style="color:var(--yellow);font-size:13px">⚠️ No se pudo consultar la salud del sistema.</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Chequear ahora'; }
+  }
+}
+
+// ── Ajustes: estadísticas de uso + feedback de noticias ───────────────────────
+async function loadUsageStats() {
+  const el = document.getElementById('usage-stats');
+  el.innerHTML = '<div class="loading-overlay" style="padding:12px"><div class="spinner"></div> Cargando estadísticas...</div>';
+  try {
+    const [usage, fb] = await Promise.all([
+      (await fetch('/api/stats/usage?days=30')).json(),
+      (await fetch('/api/news/feedback/stats')).json(),
+    ]);
+
+    const activeDays = (usage.by_day || []).length;
+    const topEndpoints = (usage.endpoints || []).slice(0, 8).map(e => `
+      <tr>
+        <td style="padding:3px 8px 3px 0;font-family:var(--mono);font-size:11px">${e.endpoint}</td>
+        <td style="padding:3px 8px 3px 0;text-align:right">${e.count}</td>
+        <td style="padding:3px 8px 3px 0;text-align:right;color:var(--text-muted)">${e.avg_duration_ms != null ? e.avg_duration_ms + ' ms' : '—'}</td>
+        <td style="padding:3px 0;text-align:right;${e.errors ? 'color:var(--red)' : 'color:var(--text-faint)'}">${e.errors || 0}</td>
+      </tr>`).join('');
+
+    const secs = fb.by_section || {};
+    const fbRows = Object.keys(secs).sort((a, b) => secs[b].shown_proxy - secs[a].shown_proxy).map(s => `
+      <tr>
+        <td style="padding:3px 8px 3px 0;font-family:var(--mono);font-size:11px">${s}</td>
+        <td style="padding:3px 8px 3px 0;text-align:right">👍 ${secs[s].likes}</td>
+        <td style="padding:3px 0;text-align:right;color:var(--text-muted)">👁 ${secs[s].reads}</td>
+      </tr>`).join('');
+    const topSyms = (fb.top_symbols_liked || []).slice(0, 6).map(x => x.symbol).join(', ');
+
+    el.innerHTML = `
+      <div style="display:flex;gap:16px;margin-bottom:10px;font-size:13px;flex-wrap:wrap">
+        <div><strong style="font-size:18px">${usage.total_requests || 0}</strong> <span style="color:var(--text-muted)">requests / 30d</span></div>
+        <div><strong style="font-size:18px">${activeDays}</strong> <span style="color:var(--text-muted)">días con actividad</span></div>
+        <div><strong style="font-size:18px">${fb.total_items || 0}</strong> <span style="color:var(--text-muted)">noticias con feedback / 90d</span></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px">Top endpoints (30d) — count · latencia · errores 5xx</div>
+      <div style="max-height:170px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">${topEndpoints || '<tr><td style="color:var(--text-muted);padding:6px 0">Sin actividad registrada todavía.</td></tr>'}</table></div>
+      ${fbRows ? `
+        <div style="font-size:11px;color:var(--text-muted);margin:10px 0 4px;text-transform:uppercase;letter-spacing:0.5px">Feedback de noticias por sección (90d)</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">${fbRows}</table>` : ''}
+      ${topSyms ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Símbolos más likeados: <span style="font-family:var(--mono);color:var(--text)">${topSyms}</span></div>` : ''}`;
+  } catch (e) {
+    console.error(e);
+    el.innerHTML = '<div style="color:var(--yellow);font-size:13px">⚠️ No se pudieron cargar las estadísticas de uso.</div>';
+  }
+}
+
 // ── Ajustes: estado del proveedor IA ──────────────────────────────────────────
 async function loadAIStatus() {
   const el = document.getElementById('ai-status');
@@ -3205,6 +3333,7 @@ async function sendChat() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.getElementById('chat-messages').innerHTML = CHAT_GREETING;
+loadVersion();
 loadPortfolio();
 loadHoyExtras();
 initSmartAlerts();

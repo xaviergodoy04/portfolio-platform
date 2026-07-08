@@ -16,3 +16,6 @@ venv/
 # SQLite
 data/*.db
 data/backups/
+
+# Logs del servicio launchd
+data/logs/

@@ -72,6 +72,24 @@ Abrir `http://localhost:5000` (o el puerto que hayas configurado) en el navegado
 
 Al arrancar, un scheduler en background (APScheduler) empieza a correr solo: verifica alertas de precio cada 5 minutos, escanea smart alerts según tu configuración, y genera el snapshot diario del portfolio + backup de la base de datos al final del día — todo sin necesidad de tener la pestaña abierta.
 
+### Correr como servicio (macOS, recomendado)
+
+Los jobs del scheduler solo corren si el server está vivo. Para que la app arranque sola al login y se relevante si se cae:
+
+```bash
+./deploy/install_launchd.sh    # instala y arranca el servicio launchd
+./deploy/uninstall_launchd.sh  # lo detiene y desinstala
+```
+
+El servicio corre con `DEBUG_MODE=false` (sin hot-reload), loguea en `data/logs/app.log` y se administra con `launchctl`:
+
+```bash
+launchctl print gui/$(id -u)/com.portfolio-platform.app   # estado
+launchctl kickstart -k gui/$(id -u)/com.portfolio-platform.app  # reiniciar (ej: tras un git pull)
+```
+
+La versión corriendo (branch + git hash) se ve siempre al pie del sidebar — si actualizaste el código y el hash no cambió, te falta reiniciar el servicio.
+
 ## API Endpoints
 
 | Método | Endpoint | Descripción |
@@ -101,6 +119,8 @@ Al arrancar, un scheduler en background (APScheduler) empieza a correr solo: ver
 | POST | `/api/news/feedback` | Marcar noticia como leída / dar like |
 | GET | `/api/news/feedback/stats` | Estadísticas de feedback y afinidad |
 | GET | `/api/stats/usage` | Uso de la plataforma por endpoint |
+| GET | `/api/version` | Versión del build corriendo (git hash + branch + hora de arranque) |
+| GET | `/api/health` | Semáforo de dependencias: mercado, IA, feeds y scheduler |
 
 ## Estructura del proyecto
 
@@ -119,6 +139,8 @@ portfolio-platform/
 │   ├── market_provider.py     # Proveedor de datos (yfinance, intercambiable)
 │   ├── ai_analysis.py         # Análisis con IA (con validación y retry del JSON)
 │   ├── ai_provider.py         # Abstracción multi-proveedor de IA (Groq / Anthropic)
+│   ├── health.py              # Salud unificada: mercado + IA + feeds + scheduler
+│   ├── version.py             # Versión del build (git hash/branch)
 │   ├── alerts.py              # Alertas de precio
 │   ├── smart_alerts.py        # Alertas inteligentes automáticas
 │   ├── radar.py               # Radar de oportunidades (Entry/Growth/Risk)
@@ -130,9 +152,13 @@ portfolio-platform/
 │       ├── health.py          # Health check de fuentes RSS
 │       ├── cache.py           # Cache de noticias
 │       └── models.py          # Modelos de datos
+├── deploy/
+│   ├── install_launchd.sh     # Instalar la app como servicio de usuario (macOS)
+│   └── uninstall_launchd.sh   # Revertirlo
 └── data/
     ├── portfolio.db           # Base de datos SQLite
-    └── backups/                # Backups diarios rotados (14 días)
+    ├── backups/                # Backups diarios rotados (14 días)
+    └── logs/                   # Logs del servicio launchd
 ```
 
 ## Stack tecnológico

@@ -22,3 +22,6 @@ data/logs/
 
 # Cache de noticias (runtime, se regenera solo)
 data/news_cache.json
+
+# Diagnóstico IBKR (XML crudo del último Flex Report)
+data/last_flex_report.xml

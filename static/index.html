@@ -52,6 +52,11 @@
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
+    /* Nada puede desbordar el ancho del viewport: lo ancho (tablas) scrollea
+       dentro de su propio contenedor. Sin esto, en el teléfono la página
+       entera queda más ancha que la pantalla y se puede "alejar" con pinch. */
+    html, body { overflow-x: hidden; }
+
     body {
       background: var(--bg);
       color: var(--text);
@@ -314,6 +319,18 @@
 
     /* Table */
     table { width: 100%; border-collapse: collapse; }
+    /* Contenedores de tablas anchas: scroll horizontal propio */
+    #positions-table, #compare-metrics-table, #compare-correlation {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    /* Los grids no dejan que una celda con contenido ancho estire la columna */
+    .bento > .card, .bento-2 > .card,
+    .grid-2 > .card, .grid-3 > .card, .grid-4 > .card { min-width: 0; }
+
+    /* Charts con altura contenida (los canvas usan maintainAspectRatio:false) */
+    .chart-box { position: relative; height: 230px; }
+    .chart-box-sm { height: 170px; }
     th {
       text-align: left;
       padding: 11px 14px;
@@ -666,6 +683,10 @@
       .chat-fab { bottom: calc(76px + env(safe-area-inset-bottom)); }
       #toast { bottom: calc(140px + env(safe-area-inset-bottom)); left: 20px; }
       .page-title { font-size: 20px; }
+      /* Tablas anchas: filas en una línea y scroll horizontal dentro de la tarjeta */
+      #positions-table table, #compare-metrics-table table, #compare-correlation table { white-space: nowrap; }
+      .chart-box { height: 190px; }
+      .chart-box-sm { height: 160px; }
     }
 
     /* ── Noticias ── */
@@ -944,11 +965,11 @@
             </div>
           </div>
           <div id="evolution-msg" style="display:none;text-align:center;padding:32px 20px;color:var(--text-muted);line-height:1.6"></div>
-          <div id="evolution-wrap"><canvas id="chart-evolution" height="110"></canvas></div>
+          <div id="evolution-wrap" class="chart-box"><canvas id="chart-evolution"></canvas></div>
         </div>
         <div class="card bento-span-2">
           <div class="card-title">Distribución por posición</div>
-          <canvas id="chart-allocation" height="110"></canvas>
+          <div class="chart-box chart-box-sm"><canvas id="chart-allocation"></canvas></div>
         </div>
       </div>
 
@@ -1958,7 +1979,7 @@ function renderAllocationChart(positions) {
       }]
     },
     options: {
-      responsive: true, cutout: '68%', plugins: {
+      responsive: true, maintainAspectRatio: false, cutout: '68%', plugins: {
         legend: { position: 'right', labels: { color: 'rgba(255,255,255,0.6)', font: { size: 12 }, boxWidth: 10, boxHeight: 10 } },
         tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw}%` } }
       }
@@ -2025,6 +2046,7 @@ async function loadEvolution() {
       },
       options: {
         responsive: true,
+        maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
           legend: { display: false },
@@ -3767,10 +3789,10 @@ async function saveIbkrCredentials() {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ token, query_id })
     });
-    if (!resp.ok) { showToast('❌ No se pudo guardar'); return; }
     const data = await resp.json();
+    if (!resp.ok) { showToast(`❌ ${data.error || 'No se pudo guardar'}`); return; }
     currentUser.ibkr_configured = data.ibkr_configured;
-    showToast('✅ Conexión IBKR guardada');
+    showToast(data.warning ? `⚠️ ${data.warning}` : '✅ Conexión IBKR guardada', data.warning ? 5000 : 3000);
     loadAccountCard();
   } catch (e) {
     showToast('❌ Error de conexión');

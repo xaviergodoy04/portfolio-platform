@@ -279,10 +279,16 @@ def bootstrap_admin_user():
         import secrets
         username = getattr(config, "ADMIN_USERNAME", "") or "xavier"
         password = getattr(config, "ADMIN_PASSWORD", "") or secrets.token_urlsafe(12)
+        # Si el .env ya trae credenciales de IBKR, la cuenta admin nace con
+        # ellas: el portfolio funciona sin re-cargar el token en la UI
+        ibkr_token = getattr(config, "IBKR_FLEX_TOKEN", "") or None
+        ibkr_query = getattr(config, "IBKR_FLEX_QUERY_ID", "") or None
         conn.execute(
-            """INSERT INTO users (id, username, password_hash, display_name, created_at)
-               VALUES (1, ?, ?, ?, ?)""",
-            (username, generate_password_hash(password), username, datetime.now().isoformat()),
+            """INSERT INTO users (id, username, password_hash, display_name,
+                                  ibkr_flex_token, ibkr_flex_query_id, created_at)
+               VALUES (1, ?, ?, ?, ?, ?, ?)""",
+            (username, generate_password_hash(password), username,
+             ibkr_token, ibkr_query, datetime.now().isoformat()),
         )
         if not getattr(config, "ADMIN_PASSWORD", ""):
             print(f"👤 Cuenta admin creada — usuario: {username} · contraseña: {password}")
@@ -740,12 +746,15 @@ def get_all_user_ids() -> list:
 
 
 def set_ibkr_credentials(user_id: int, token: str, query_id: str):
-    """Guarda el token+queryID de IBKR Flex Query propio de un usuario."""
+    """Guarda el token+queryID de IBKR Flex Query propio de un usuario.
+    Update parcial: un campo vacío NO pisa el valor ya guardado — así pegar
+    solo el token nuevo no borra el query_id (bug real: dejaba credenciales
+    a medias y cada refresh fallaba contra IBKR hasta el bloqueo 1025)."""
     with db_conn() as conn:
-        conn.execute(
-            "UPDATE users SET ibkr_flex_token = ?, ibkr_flex_query_id = ? WHERE id = ?",
-            (token, query_id, user_id),
-        )
+        if token:
+            conn.execute("UPDATE users SET ibkr_flex_token = ? WHERE id = ?", (token, user_id))
+        if query_id:
+            conn.execute("UPDATE users SET ibkr_flex_query_id = ? WHERE id = ?", (query_id, user_id))
 
 
 # ── Instrumentación de uso de endpoints ──────────────────────────────────────

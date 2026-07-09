@@ -153,8 +153,18 @@ def account_set_ibkr():
     body = request.get_json(silent=True) or {}
     token = (body.get("token") or "").strip()
     query_id = (body.get("query_id") or "").strip()
-    db.set_ibkr_credentials(auth.current_user_id(), token, query_id)
-    return jsonify({"ok": True, "ibkr_configured": bool(token)})
+    if not token and not query_id:
+        return jsonify({"error": "Pegá al menos el token o el query ID"}), 400
+    user_id = auth.current_user_id()
+    db.set_ibkr_credentials(user_id, token, query_id)
+    # Estado efectivo tras el update parcial (campo vacío no pisa lo guardado)
+    user = db.get_user(user_id)
+    configured = bool(user.get("ibkr_flex_token")) and bool(user.get("ibkr_flex_query_id"))
+    warning = None
+    if not configured:
+        missing = "query ID" if user.get("ibkr_flex_token") else "token"
+        warning = f"Falta el {missing} — la conexión queda incompleta hasta cargarlo."
+    return jsonify({"ok": True, "ibkr_configured": configured, "warning": warning})
 
 
 @app.route("/api/stats/usage")

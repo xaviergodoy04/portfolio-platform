@@ -72,6 +72,15 @@ Abrir `http://localhost:5000` (o el puerto que hayas configurado) en el navegado
 
 Al arrancar, un scheduler en background (APScheduler) empieza a correr solo: verifica alertas de precio cada 5 minutos, escanea smart alerts según tu configuración, y genera el snapshot diario del portfolio + backup de la base de datos al final del día — todo sin necesidad de tener la pestaña abierta.
 
+### Usar en el celular (PWA)
+
+La app es una PWA instalable: con el teléfono **en la misma red Wi-Fi**, abrí la URL que muestra **Ajustes → Usar en el celular** (la app detecta la IP local sola) y agregala al inicio:
+
+- **iPhone:** Safari → Compartir → *Agregar a pantalla de inicio*
+- **Android:** Chrome → menú ⋮ → *Agregar a pantalla principal*
+
+Queda con ícono propio, pantalla completa y navegación por tabs inferiores. El server escucha en la red local por `APP_HOST=0.0.0.0` (default) — ponelo en `127.0.0.1` si estás en una red compartida, porque no hay login. Para usarla **fuera de casa** (y con HTTPS, que habilita el modo offline del service worker), la opción gratis recomendada es [Tailscale](https://tailscale.com) en la Mac y el teléfono.
+
 ### Correr como servicio (macOS, recomendado)
 
 Los jobs del scheduler solo corren si el server está vivo. Para que la app arranque sola al login y se relevante si se cae:

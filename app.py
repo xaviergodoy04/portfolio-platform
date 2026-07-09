@@ -205,9 +205,37 @@ def service_worker():
     return send_from_directory("static", "sw.js", mimetype="application/javascript")
 
 
+_funnel_cache = {"ts": 0.0, "url": None}
+_FUNNEL_TTL = 300  # el estado del funnel cambia poco: 5 min de cache alcanzan
+
+
+def _detect_funnel_url():
+    """URL pública de Tailscale Funnel si está activo en esta máquina (best
+    effort: si no hay CLI de Tailscale o no hay funnel, None)."""
+    import re
+    import subprocess
+    if time.time() - _funnel_cache["ts"] < _FUNNEL_TTL:
+        return _funnel_cache["url"]
+    url = None
+    for cli in ("/Applications/Tailscale.app/Contents/MacOS/Tailscale", "tailscale"):
+        try:
+            out = subprocess.run([cli, "funnel", "status"],
+                                 capture_output=True, text=True, timeout=5)
+            m = re.search(r"(https://[\w.-]+\.ts\.net)\S*\s*\(Funnel on\)", out.stdout)
+            if m:
+                url = m.group(1)
+            break
+        except FileNotFoundError:
+            continue
+        except Exception:
+            break
+    _funnel_cache.update(ts=time.time(), url=url)
+    return url
+
+
 @app.route("/api/mobile-info")
 def mobile_info():
-    """IP LAN del server para armar la URL que se abre desde el celular."""
+    """IP LAN + URL pública (Funnel) para armar los accesos desde el celular."""
     import socket
     lan_ip = None
     try:
@@ -223,6 +251,7 @@ def mobile_info():
     return jsonify({
         "lan_enabled": lan_enabled,
         "lan_url": f"http://{lan_ip}:{config.APP_PORT}" if (lan_ip and lan_enabled) else None,
+        "public_url": _detect_funnel_url(),
         "host": config.APP_HOST,
         "port": config.APP_PORT,
     })

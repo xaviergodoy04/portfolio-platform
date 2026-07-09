@@ -3823,21 +3823,29 @@ async function loadMobileInfo() {
       el.innerHTML = '<div style="font-size:13px;color:var(--yellow)">⚠️ No se pudo detectar la IP local — ¿estás conectado a la red?</div>';
       return;
     }
+    const publicBlock = info.public_url ? `
+      <p style="color:var(--text-muted);margin:0 0 6px;line-height:1.6;font-size:13px">
+        🌍 <strong style="color:var(--text)">Desde cualquier lugar</strong> (datos móviles, otra red — vía Tailscale Funnel):
+      </p>
+      <div style="background:var(--surface2);border-radius:8px;padding:12px;text-align:center;margin-bottom:14px">
+        <a href="${info.public_url}" style="font-family:var(--mono);font-size:15px;color:var(--accent);text-decoration:none;word-break:break-all">${info.public_url}</a>
+      </div>` : '';
     el.innerHTML = `
-      <p style="color:var(--text-muted);margin-bottom:10px;line-height:1.6;font-size:13px">
-        Con el celular en <strong style="color:var(--text)">la misma red Wi-Fi</strong>, abrí esta dirección:
+      ${publicBlock}
+      <p style="color:var(--text-muted);margin-bottom:6px;line-height:1.6;font-size:13px">
+        📶 Con el celular en <strong style="color:var(--text)">la misma red Wi-Fi</strong>:
       </p>
       <div style="background:var(--surface2);border-radius:8px;padding:12px;text-align:center;margin-bottom:12px">
-        <a href="${info.lan_url}" style="font-family:var(--mono);font-size:17px;color:var(--accent);text-decoration:none">${info.lan_url}</a>
+        <a href="${info.lan_url}" style="font-family:var(--mono);font-size:15px;color:var(--accent);text-decoration:none">${info.lan_url}</a>
       </div>
       <div style="font-size:12px;color:var(--text-muted);line-height:1.8">
         <strong style="color:var(--text)">Para instalarla como app:</strong><br>
         🍎 iPhone: Safari → botón Compartir → <em>Agregar a pantalla de inicio</em><br>
         🤖 Android: Chrome → menú ⋮ → <em>Agregar a pantalla principal</em>
       </div>
-      <div style="margin-top:12px;padding:10px 12px;background:var(--surface2);border-radius:8px;font-size:11px;color:var(--text-muted);line-height:1.6">
-        ⚠️ Sin login: cualquiera en tu Wi-Fi puede abrir esa URL. Para usarla fuera de casa (y con HTTPS), la opción gratis recomendada es <strong style="color:var(--text)">Tailscale</strong> en la Mac y el teléfono.
-      </div>`;
+      ${info.public_url ? '' : `<div style="margin-top:12px;padding:10px 12px;background:var(--surface2);border-radius:8px;font-size:11px;color:var(--text-muted);line-height:1.6">
+        💡 Para usarla fuera de casa (y con HTTPS), la opción gratis recomendada es <strong style="color:var(--text)">Tailscale Funnel</strong> en la Mac.
+      </div>`}`;
   } catch (e) {
     el.innerHTML = '<div style="color:var(--yellow);font-size:13px">⚠️ No se pudo consultar la info de red.</div>';
   }

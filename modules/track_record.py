@@ -20,14 +20,14 @@ from modules.market_data import get_quote, get_history
 TRACK_RECORD_TTL = 15 * 60  # 15 minutos
 
 _cache_lock = threading.Lock()
-_cached = None  # (timestamp, result)
+_cached = {}  # {user_id: (timestamp, result)}
 
 
 def clear_cache():
     """Vacía el cache del track record (útil para tests)."""
     global _cached
     with _cache_lock:
-        _cached = None
+        _cached = {}
 
 
 def _empty_summary(total: int = 0) -> dict:
@@ -41,13 +41,14 @@ def _empty_summary(total: int = 0) -> dict:
     }
 
 
-def _load_alerts() -> list:
-    """Todas las smart alerts del historial, más recientes primero."""
+def _load_alerts(user_id: int) -> list:
+    """Todas las smart alerts del historial de un usuario, más recientes primero."""
     with db.db_conn() as conn:
         rows = conn.execute(
             """SELECT id, symbol, detected_at, price_at_detection,
                       entry_score, growth_score, risk_score
-               FROM smart_alerts ORDER BY detected_at DESC"""
+               FROM smart_alerts WHERE user_id = ? ORDER BY detected_at DESC""",
+            (user_id,),
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -83,9 +84,9 @@ def _spy_close_at(dates: list, closes: list, date_str: str):
     return closes[idx]
 
 
-def _build_track_record() -> dict:
+def _build_track_record(user_id: int) -> dict:
     now = datetime.now()
-    raw_alerts = _load_alerts()
+    raw_alerts = _load_alerts(user_id)
 
     if not raw_alerts:
         return {
@@ -186,19 +187,16 @@ def _build_track_record() -> dict:
     }
 
 
-def get_track_record(force_refresh: bool = False) -> dict:
-    """Track record completo, cacheado TRACK_RECORD_TTL segundos en memoria."""
+def get_track_record(user_id: int, force_refresh: bool = False) -> dict:
+    """Track record de un usuario, cacheado TRACK_RECORD_TTL segundos en memoria."""
     global _cached
     with _cache_lock:
-        if (
-            not force_refresh
-            and _cached is not None
-            and (time.time() - _cached[0]) < TRACK_RECORD_TTL
-        ):
-            return _cached[1]
+        cached = _cached.get(user_id)
+        if not force_refresh and cached is not None and (time.time() - cached[0]) < TRACK_RECORD_TTL:
+            return cached[1]
 
-    result = _build_track_record()
+    result = _build_track_record(user_id)
 
     with _cache_lock:
-        _cached = (time.time(), result)
+        _cached[user_id] = (time.time(), result)
     return result

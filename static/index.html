@@ -191,6 +191,43 @@
       text-overflow: ellipsis;
     }
 
+    /* Control de cuenta, justo arriba de la versión */
+    .sidebar-account {
+      position: fixed;
+      bottom: 34px;
+      width: 220px;
+      padding: 9px 18px;
+      font-size: 12px;
+      background: var(--sidebar);
+      border-top: 1px solid var(--border-soft);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sidebar-account .acc-name {
+      color: var(--text);
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+    .sidebar-account a {
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .sidebar-account a:hover { color: var(--accent-hover); }
+
+    /* Estado vacío "iniciá sesión" (mismo idioma visual que los otros vacíos) */
+    .login-gate {
+      text-align: center;
+      padding: 36px 20px;
+      color: var(--text-muted);
+    }
+    .login-gate .login-gate-icon { font-size: 28px; margin-bottom: 10px; }
+
     .main {
       margin-left: 220px;
       flex: 1;
@@ -597,7 +634,7 @@
         border-top: 1px solid var(--border-soft);
         overflow: visible;
       }
-      .sidebar-logo, .sidebar-version { display: none; }
+      .sidebar-logo, .sidebar-version, .sidebar-account { display: none; }
       .nav-item {
         position: relative;
         flex: 1;
@@ -872,6 +909,7 @@
     </div>
     <div class="nav-item" id="nav-news" onclick="navigate('news')">📰 <span>Noticias</span></div>
     <div class="nav-item" id="nav-setup" onclick="navigate('setup')">⚙️ <span>Ajustes</span></div>
+    <div class="sidebar-account" id="sidebar-account"></div>
     <div class="sidebar-version" id="sidebar-version" title="Versión del server corriendo">…</div>
   </nav>
 
@@ -1360,6 +1398,11 @@
 
       <div class="grid-2">
         <div class="card">
+          <div class="card-title">👤 Mi cuenta</div>
+          <div id="account-card"><div class="loading-overlay" style="padding:12px"><div class="spinner"></div> Cargando...</div></div>
+        </div>
+
+        <div class="card">
           <div class="card-title">🩺 Salud del sistema</div>
           <p style="color:var(--text-muted);margin-bottom:12px;line-height:1.6">
             Semáforo de las dependencias críticas: datos de mercado, proveedor IA, fuentes de noticias y scheduler interno.
@@ -1512,6 +1555,31 @@
   </div>
 </div>
 
+<!-- Login modal -->
+<div id="login-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1100;align-items:center;justify-content:center">
+  <div class="card glass" style="width:340px;max-width:90vw">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <strong>Iniciar sesión</strong>
+      <button onclick="closeLoginModal()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:18px">✕</button>
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label class="form-label">Usuario</label>
+      <input id="login-username" placeholder="usuario" autocomplete="username"
+             onkeydown="if(event.key==='Enter')document.getElementById('login-password').focus()">
+    </div>
+    <div class="form-group" style="margin-bottom:16px">
+      <label class="form-label">Contraseña</label>
+      <input id="login-password" type="password" placeholder="••••••••" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter')submitLogin()">
+    </div>
+    <div id="login-error" style="display:none;color:var(--red);font-size:12px;margin-bottom:12px"></div>
+    <button class="btn btn-primary" style="width:100%" onclick="submitLogin()">Entrar</button>
+    <p style="color:var(--text-faint);font-size:11px;margin-top:14px;line-height:1.6">
+      Las cuentas son por invitación — si no tenés usuario, pedíselo a quien te compartió la app.
+    </p>
+  </div>
+</div>
+
 <!-- Chat contextual: burbuja flotante + panel lateral -->
 <button class="chat-fab" id="chat-fab" onclick="toggleChat()" title="Chat IA">💬</button>
 
@@ -1582,6 +1650,94 @@ function countUp(el, value, fmtFn, dur = 900) {
   requestAnimationFrame(step);
 }
 
+// ── Cuenta / sesión ────────────────────────────────────────────────────────
+// La app es navegable sin cuenta (Explorar, Noticias, chat). Solo Hoy,
+// Alertas, watchlist y la conexión a IBKR piden login — currentUser es null
+// hasta que checkAuth() resuelva /api/auth/me.
+let currentUser = null;
+
+async function checkAuth() {
+  try {
+    const resp = await fetch('/api/auth/me');
+    currentUser = resp.ok ? await resp.json() : null;
+  } catch (e) {
+    currentUser = null;
+  }
+  renderAccountControl();
+}
+
+function renderAccountControl() {
+  const el = document.getElementById('sidebar-account');
+  if (!el) return;
+  el.innerHTML = currentUser
+    ? `<span class="acc-name">👤 ${currentUser.display_name}</span><a onclick="doLogout()">Salir</a>`
+    : `<a onclick="openLoginModal()" style="width:100%">🔑 Iniciar sesión</a>`;
+}
+
+function openLoginModal() {
+  document.getElementById('login-error').style.display = 'none';
+  document.getElementById('login-username').value = '';
+  document.getElementById('login-password').value = '';
+  document.getElementById('login-modal').style.display = 'flex';
+  document.getElementById('login-username').focus();
+}
+
+function closeLoginModal() {
+  document.getElementById('login-modal').style.display = 'none';
+}
+
+async function submitLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
+  if (!username || !password) {
+    errEl.textContent = 'Completá usuario y contraseña.';
+    errEl.style.display = 'block';
+    return;
+  }
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ username, password })
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      errEl.textContent = data.error || 'No se pudo iniciar sesión.';
+      errEl.style.display = 'block';
+      return;
+    }
+    closeLoginModal();
+    await checkAuth();
+    showToast(`👋 Hola, ${currentUser.display_name}`);
+    // Refrescar lo que haya quedado bloqueado por falta de sesión
+    if (document.getElementById('page-hoy').classList.contains('active')) { loadPortfolio(true); loadHoyExtras(); }
+    if (document.getElementById('page-alertas').classList.contains('active')) loadAlerts();
+    if (document.getElementById('page-setup').classList.contains('active')) loadAccountCard();
+    initSmartAlerts();  // arranca config + polling privado recién ahora que hay sesión
+  } catch (e) {
+    errEl.textContent = 'Error de conexión.';
+    errEl.style.display = 'block';
+  }
+}
+
+async function doLogout() {
+  try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+  currentUser = null;
+  renderAccountControl();
+  showToast('👋 Sesión cerrada');
+  if (document.getElementById('page-hoy').classList.contains('active')) loadPortfolio();
+  if (document.getElementById('page-alertas').classList.contains('active')) loadAlerts();
+  if (document.getElementById('page-setup').classList.contains('active')) loadAccountCard();
+}
+
+function loginGateHTML(message) {
+  return `<div class="login-gate">
+    <div class="login-gate-icon">🔒</div>
+    <div style="margin-bottom:16px;line-height:1.6">${message}</div>
+    <button class="btn btn-primary btn-sm" onclick="openLoginModal()">🔑 Iniciar sesión</button>
+  </div>`;
+}
+
 let portfolioData = null;
 // Estado global de la watchlist: se carga al inicio y tras cada toggle,
 // así las estrellas de radar/detalle se pintan sin un fetch por fila.
@@ -1606,7 +1762,7 @@ function navigate(page) {
   if (page === 'alertas') { loadAlerts(); loadSmartHistory(); pollUnseenBadge(); }
   // Noticias: carga automática solo si no hay datos aún (usa caché)
   if (page === 'news' && newsTotal() === 0) loadNews(false);
-  if (page === 'setup') { loadSystemHealth(); loadUsageStats(); loadAIStatus(); loadFeedHealth(); loadMobileInfo(); }
+  if (page === 'setup') { loadSystemHealth(); loadUsageStats(); loadAIStatus(); loadFeedHealth(); loadMobileInfo(); loadAccountCard(); }
   replayReveals(document.getElementById(`page-${page}`));
   window.scrollTo(0, 0);
 }
@@ -1688,9 +1844,16 @@ function fmtBig(n) {
 
 // ── Portfolio ─────────────────────────────────────────────────────────────────
 async function loadPortfolio(refresh = false) {
+  if (!currentUser) {
+    document.getElementById('positions-table').innerHTML =
+      loginGateHTML('Iniciá sesión para ver y trackear tu portfolio.');
+    document.getElementById('m-total').textContent = '—';
+    return;
+  }
   const url = `/api/portfolio${refresh ? '?refresh=true' : ''}`;
   try {
     const resp = await fetch(url);
+    if (resp.status === 401) { currentUser = null; renderAccountControl(); return loadPortfolio(); }
     const data = await resp.json();
     portfolioData = data;
     renderPortfolio(data);
@@ -1818,6 +1981,12 @@ function setEvoRange(days) {
 async function loadEvolution() {
   const msg = document.getElementById('evolution-msg');
   const wrap = document.getElementById('evolution-wrap');
+  if (!currentUser) {
+    wrap.style.display = 'none';
+    msg.style.display = 'block';
+    msg.innerHTML = loginGateHTML('Iniciá sesión para ver la evolución de tu portfolio.');
+    return;
+  }
   try {
     const resp = await fetch(`/api/portfolio/history?days=${evoDays}`);
     const data = await resp.json();
@@ -1890,6 +2059,7 @@ function loadHoyExtras() {
 let _hoyUnseen = [];
 
 async function loadHoySmart() {
+  if (!currentUser) { document.getElementById('hoy-smart-section').style.display = 'none'; return; }
   try {
     const resp = await fetch('/api/smart-alerts/unseen');
     const unseen = await resp.json();
@@ -1909,6 +2079,7 @@ async function markHoySmartSeen() {
 }
 
 async function loadHoyTriggered() {
+  if (!currentUser) { document.getElementById('hoy-alerts-section').style.display = 'none'; return; }
   try {
     const resp = await fetch('/api/alerts');
     const alerts = await resp.json();
@@ -1973,8 +2144,15 @@ function isWatched(symbol) {
 }
 
 async function loadWatchlist() {
+  if (!currentUser) {
+    watchlistData = []; watchlistSet = new Set();
+    renderHoyWatchlist();
+    refreshStars();
+    return;
+  }
   try {
     const resp = await fetch('/api/watchlist');
+    if (resp.status === 401) { currentUser = null; renderAccountControl(); return loadWatchlist(); }
     watchlistData = await resp.json();
     watchlistSet = new Set(watchlistData.map(w => w.symbol));
   } catch(e) {
@@ -1989,6 +2167,8 @@ async function toggleWatchlist(symbol, ev) {
   symbol = (symbol || '').trim().toUpperCase();
   if (!symbol) return;
 
+  if (!currentUser) { openLoginModal(); return; }
+
   try {
     if (isWatched(symbol)) {
       await fetch(`/api/watchlist/${symbol}`, { method: 'DELETE' });
@@ -1998,6 +2178,7 @@ async function toggleWatchlist(symbol, ev) {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ symbol })
       });
+      if (resp.status === 401) { currentUser = null; renderAccountControl(); openLoginModal(); return; }
       if (!resp.ok) {
         const data = await resp.json().catch(() => ({}));
         showToast(`❌ ${data.error || 'No se pudo agregar a la watchlist'}`);
@@ -2027,6 +2208,10 @@ function refreshStars() {
 function renderHoyWatchlist() {
   const el = document.getElementById('hoy-watchlist');
   if (!el) return;
+  if (!currentUser) {
+    el.innerHTML = '<div style="padding:8px 0;color:var(--text-muted);font-size:13px">🔒 <a onclick="openLoginModal()" style="color:var(--accent);cursor:pointer">Iniciá sesión</a> para armar tu watchlist.</div>';
+    return;
+  }
   if (!watchlistData.length) {
     el.innerHTML = '<div style="padding:8px 0;color:var(--text-muted);font-size:13px">Marcá activos con ⭐ desde Explorar.</div>';
     return;
@@ -2509,7 +2694,13 @@ function switchAlertsSection(sec) {
 
 // ── Alerts ────────────────────────────────────────────────────────────────────
 async function loadAlerts() {
+  if (!currentUser) {
+    document.getElementById('alerts-list').innerHTML =
+      loginGateHTML('Iniciá sesión para crear y ver tus alertas.');
+    return;
+  }
   const resp = await fetch('/api/alerts');
+  if (resp.status === 401) { currentUser = null; renderAccountControl(); return loadAlerts(); }
   const alerts = await resp.json();
   renderAlerts(alerts);
 }
@@ -2918,6 +3109,7 @@ function radarSetAlert(symbol, price) {
 
 // ── Smart Alerts ──────────────────────────────────────────────────────────────
 async function initSmartAlerts() {
+  if (!currentUser) return;  // config y polling son privados: nada que hacer sin cuenta
   // Pedir permiso de notificaciones
   if ('Notification' in window && Notification.permission === 'default') {
     await Notification.requestPermission();
@@ -3535,6 +3727,56 @@ async function loadUsageStats() {
 }
 
 // ── Ajustes: acceso desde el celular (PWA) ────────────────────────────────────
+// ── Ajustes: Mi cuenta (login/logout + IBKR propio) ───────────────────────────
+function loadAccountCard() {
+  const el = document.getElementById('account-card');
+  if (!currentUser) {
+    el.innerHTML = `
+      <p style="color:var(--text-muted);margin-bottom:12px;line-height:1.6;font-size:13px">
+        Con una cuenta podés trackear tu propio portfolio, crear alertas y armar tu watchlist.
+        Las cuentas son por invitación.
+      </p>
+      <button class="btn btn-primary btn-sm" onclick="openLoginModal()">🔑 Iniciar sesión</button>`;
+    return;
+  }
+  el.innerHTML = `
+    <div style="font-size:13px;margin-bottom:16px">
+      Conectado como <strong style="color:var(--accent)">${currentUser.display_name}</strong>
+      <button class="btn btn-outline btn-sm" style="margin-left:10px" onclick="doLogout()">Cerrar sesión</button>
+    </div>
+    <div class="card-title" style="margin-bottom:8px">Mi conexión IBKR</div>
+    <p style="color:var(--text-muted);margin-bottom:10px;font-size:12px;line-height:1.6">
+      ${currentUser.ibkr_configured ? '✅ Ya tenés un token guardado — pegá uno nuevo para reemplazarlo.' : 'Opcional: si preferís no usarlo, podés cargar tu portfolio por CSV o a mano.'}
+    </p>
+    <div class="form-group" style="margin-bottom:10px">
+      <label class="form-label">Token de Flex Query</label>
+      <input id="acc-ibkr-token" placeholder="${currentUser.ibkr_configured ? '•••••••• (guardado)' : 'token'}">
+    </div>
+    <div class="form-group" style="margin-bottom:10px">
+      <label class="form-label">Query ID</label>
+      <input id="acc-ibkr-query" placeholder="${currentUser.ibkr_configured ? '•••• (guardado)' : 'query id'}">
+    </div>
+    <button class="btn btn-outline btn-sm" onclick="saveIbkrCredentials()">Guardar</button>`;
+}
+
+async function saveIbkrCredentials() {
+  const token = document.getElementById('acc-ibkr-token').value.trim();
+  const query_id = document.getElementById('acc-ibkr-query').value.trim();
+  try {
+    const resp = await fetch('/api/account/ibkr', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ token, query_id })
+    });
+    if (!resp.ok) { showToast('❌ No se pudo guardar'); return; }
+    const data = await resp.json();
+    currentUser.ibkr_configured = data.ibkr_configured;
+    showToast('✅ Conexión IBKR guardada');
+    loadAccountCard();
+  } catch (e) {
+    showToast('❌ Error de conexión');
+  }
+}
+
 async function loadMobileInfo() {
   const el = document.getElementById('mobile-info');
   try {
@@ -3710,9 +3952,11 @@ async function sendChat() {
 document.getElementById('chat-messages').innerHTML = CHAT_GREETING;
 initReveals();
 loadVersion();
-loadPortfolio();
-loadHoyExtras();
-initSmartAlerts();
+checkAuth().then(() => {
+  loadPortfolio();
+  loadHoyExtras();
+  initSmartAlerts();
+});
 
 // PWA: el registro falla sin contexto seguro (HTTP de LAN) y no pasa nada —
 // la app sigue como web normal; con HTTPS o localhost queda instalable offline

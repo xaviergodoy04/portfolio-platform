@@ -53,7 +53,7 @@ _STOPWORDS = {
 _token_re = re.compile(r"[a-z0-9áéíóúüñ]+")
 
 _profile_lock = threading.Lock()
-_profile_cache = {"ts": 0.0, "profile": None}
+_profile_cache = {}  # {user_id: {"ts": float, "profile": dict}}
 
 
 def _title_tokens(title: str) -> set:
@@ -74,13 +74,13 @@ def _decay(ts_iso: str, now: datetime) -> float:
     return 0.5 ** (age_days / HALF_LIFE_DAYS)
 
 
-def build_profile() -> dict:
+def build_profile(user_id: int) -> dict:
     """
-    Construye el perfil desde el feedback de los últimos 90 días.
+    Construye el perfil de un usuario desde su feedback de los últimos 90 días.
     Retorna {sources, symbols, keywords}, cada uno un dict {clave: afinidad}
     normalizado a [0, 1] (dividido por el máximo de su dimensión).
     """
-    rows = db.get_feedback_rows(FEEDBACK_WINDOW_DAYS)
+    rows = db.get_feedback_rows(user_id, FEEDBACK_WINDOW_DAYS)
     now = datetime.now()
     sources, symbols, keywords = {}, {}, {}
 
@@ -114,33 +114,31 @@ def build_profile() -> dict:
     }
 
 
-def _get_profile() -> dict:
-    """Perfil cacheado en memoria (TTL 10 min), rebuild lazy y thread-safe."""
+def _get_profile(user_id: int) -> dict:
+    """Perfil de un usuario cacheado en memoria (TTL 10 min), rebuild lazy y thread-safe."""
     with _profile_lock:
-        if (
-            _profile_cache["profile"] is None
-            or time.time() - _profile_cache["ts"] > PROFILE_TTL
-        ):
-            _profile_cache["profile"] = build_profile()
-            _profile_cache["ts"] = time.time()
-        return _profile_cache["profile"]
+        cached = _profile_cache.get(user_id)
+        if cached is None or time.time() - cached["ts"] > PROFILE_TTL:
+            cached = {"profile": build_profile(user_id), "ts": time.time()}
+            _profile_cache[user_id] = cached
+        return cached["profile"]
 
 
-def invalidate_profile() -> None:
-    """Fuerza el rebuild en el próximo uso (se llama al registrar feedback)."""
+def invalidate_profile(user_id: int) -> None:
+    """Fuerza el rebuild del perfil de un usuario en el próximo uso
+    (se llama al registrar feedback)."""
     with _profile_lock:
-        _profile_cache["profile"] = None
-        _profile_cache["ts"] = 0.0
+        _profile_cache.pop(user_id, None)
 
 
-def affinity_bonus(item: dict) -> float:
+def affinity_bonus(item: dict, user_id: int) -> float:
     """
-    Bonus de afinidad para un item serializado del feed (dict con source,
-    symbols y title). Suma la afinidad normalizada de la fuente (0-1), la del
-    mejor símbolo mencionado (0-1) y la de las keywords del título (capeada a
-    1.0), con tope total de +2.0.
+    Bonus de afinidad de un usuario para un item serializado del feed (dict
+    con source, symbols y title). Suma la afinidad normalizada de la fuente
+    (0-1), la del mejor símbolo mencionado (0-1) y la de las keywords del
+    título (capeada a 1.0), con tope total de +2.0.
     """
-    profile = _get_profile()
+    profile = _get_profile(user_id)
     if not (profile["sources"] or profile["symbols"] or profile["keywords"]):
         return 0.0
 

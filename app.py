@@ -7,9 +7,10 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
-from flask import Flask, g, jsonify, request, send_from_directory
+from flask import Flask, g, jsonify, request, send_from_directory, session
 from flask_cors import CORS
 import threading
+import secrets
 
 import config
 from modules.ibkr import fetch_flex_report, parse_csv_upload
@@ -33,6 +34,7 @@ from modules.scheduler import init_scheduler, pop_pending_triggered
 from modules.track_record import get_track_record
 from modules.version import get_version
 from modules.health import get_health
+from modules import auth
 import asyncio
 import time
 from modules import db
@@ -43,22 +45,24 @@ from modules.news import health as news_health
 from modules.news.affinity import affinity_bonus, invalidate_profile
 
 app = Flask(__name__, static_folder="static")
-CORS(app)
+CORS(app, supports_credentials=True)
 
-# Cache en memoria para el portfolio (se limpia al reiniciar)
+# Firma la cookie de sesión. Sin SECRET_KEY en .env, se genera una al azar en
+# memoria: la app funciona pero las sesiones no sobreviven un restart.
+app.secret_key = config.SECRET_KEY or secrets.token_hex(32)
+if not config.SECRET_KEY:
+    print("⚠️  SECRET_KEY no configurada — las sesiones no sobrevivirán un restart. Fijala en .env.")
+
+# Cache en memoria del portfolio de cada usuario (se limpia al reiniciar):
+# {user_id: {...datos del portfolio...}}
 _portfolio_cache = {}
 
-# Hidratar el cache desde la DB: un reinicio no obliga a esperar a IBKR
-_stored_portfolio = db.load_portfolio_cache()
-if _stored_portfolio:
-    _portfolio_cache["data"] = _stored_portfolio
 
-
-def _persist_portfolio(data: dict):
-    """Guarda el portfolio en la DB y hace upsert del snapshot del día."""
+def _persist_portfolio(user_id: int, data: dict):
+    """Guarda el portfolio de un usuario en la DB y hace upsert del snapshot del día."""
     try:
-        db.save_portfolio_cache(data)
-        db.upsert_snapshot(data)
+        db.save_portfolio_cache(user_id, data)
+        db.upsert_snapshot(user_id, data)
     except Exception as e:
         print(f"⚠️  Error persistiendo portfolio en la DB: {e}")
 
@@ -101,10 +105,56 @@ def _usage_log_request(response):
         # Usar la regla de la ruta (ej: /api/quote/<symbol>) para agregar
         # por endpoint y no por cada símbolo pedido
         endpoint = request.url_rule.rule if request.url_rule else path
-        db.log_event(endpoint, request.method, response.status_code, duration_ms)
+        db.log_event(endpoint, request.method, response.status_code, duration_ms,
+                     user_id=auth.current_user_id())
     except Exception:
         pass  # la instrumentación nunca debe romper un request
     return response
+
+
+# ── Autenticación (login/logout públicos; el resto de rutas privadas usa
+# @auth.login_required) ──────────────────────────────────────────────────────
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    body = request.get_json(silent=True) or {}
+    username = (body.get("username") or "").strip().lower()
+    password = body.get("password") or ""
+    user = auth.login(username, password)
+    if not user:
+        return jsonify({"error": "Usuario o contraseña incorrectos"}), 401
+    return jsonify(user)
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    auth.logout()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/auth/me")
+def auth_me():
+    user_id = auth.current_user_id()
+    if user_id is None:
+        return jsonify({"error": "No hay sesión"}), 401
+    user = db.get_user(user_id)
+    if not user:
+        auth.logout()  # sesión de un usuario que ya no existe
+        return jsonify({"error": "No hay sesión"}), 401
+    return jsonify({
+        "id": user["id"], "username": user["username"], "display_name": user["display_name"],
+        "ibkr_configured": bool(user.get("ibkr_flex_token")),
+    })
+
+
+@app.route("/api/account/ibkr", methods=["POST"])
+@auth.login_required
+def account_set_ibkr():
+    body = request.get_json(silent=True) or {}
+    token = (body.get("token") or "").strip()
+    query_id = (body.get("query_id") or "").strip()
+    db.set_ibkr_credentials(auth.current_user_id(), token, query_id)
+    return jsonify({"ok": True, "ibkr_configured": bool(token)})
 
 
 @app.route("/api/stats/usage")
@@ -168,17 +218,36 @@ def mobile_info():
     })
 
 
-# ── Portfolio / IBKR ─────────────────────────────────────────────────────────
+# ── Portfolio / IBKR (privado — requiere cuenta) ─────────────────────────────
+
+def _get_cached_portfolio(user_id: int):
+    """Portfolio de un usuario: memoria primero, si no hidrata desde la DB
+    (un reinicio no obliga a esperar a IBKR)."""
+    if user_id not in _portfolio_cache:
+        stored = db.load_portfolio_cache(user_id)
+        if stored:
+            _portfolio_cache[user_id] = stored
+    return _portfolio_cache.get(user_id)
+
 
 @app.route("/api/portfolio", methods=["GET"])
+@auth.login_required
 def get_portfolio():
-    """Obtiene portfolio desde IBKR Flex Query (o caché)."""
+    """Obtiene portfolio desde IBKR Flex Query propio del usuario (o caché)."""
+    user_id = auth.current_user_id()
     force_refresh = request.args.get("refresh", "false") == "true"
 
-    if not force_refresh and _portfolio_cache.get("data"):
-        return jsonify(_portfolio_cache["data"])
+    cached = _get_cached_portfolio(user_id)
+    if not force_refresh and cached:
+        return jsonify(cached)
 
-    data = fetch_flex_report(config.IBKR_FLEX_TOKEN, config.IBKR_FLEX_QUERY_ID)
+    user = db.get_user(user_id)
+    token, query_id = user.get("ibkr_flex_token"), user.get("ibkr_flex_query_id")
+    if not token or not query_id:
+        return jsonify({"error": "No tenés IBKR conectado — cargá tu token en Ajustes, "
+                                  "subí un CSV o cargá tus posiciones a mano."})
+
+    data = fetch_flex_report(token, query_id)
 
     if "error" not in data and data.get("positions"):
         # Enriquecer con datos de mercado actuales
@@ -190,33 +259,37 @@ def get_portfolio():
         data["summary"]["total_value"] = round(total_val, 2)
         data["summary"]["total_unrealized_pnl"] = round(total_pnl, 2)
         data["summary"]["total_pnl_pct"] = round((total_pnl / cost_basis * 100) if cost_basis != 0 else 0, 2)
-        _portfolio_cache["data"] = data
-        _persist_portfolio(data)
+        _portfolio_cache[user_id] = data
+        _persist_portfolio(user_id, data)
 
     return jsonify(data)
 
 
 @app.route("/api/portfolio/upload", methods=["POST"])
+@auth.login_required
 def upload_csv():
     """Carga portfolio desde CSV exportado de IB."""
     if "file" not in request.files:
         return jsonify({"error": "No se recibió archivo"}), 400
 
+    user_id = auth.current_user_id()
     file = request.files["file"]
     content = file.read().decode("utf-8", errors="replace")
     data = parse_csv_upload(content)
 
     if "error" not in data and data.get("positions"):
         data["positions"] = enrich_positions(data["positions"])
-        _portfolio_cache["data"] = data
-        _persist_portfolio(data)
+        _portfolio_cache[user_id] = data
+        _persist_portfolio(user_id, data)
 
     return jsonify(data)
 
 
 @app.route("/api/portfolio/manual", methods=["POST"])
+@auth.login_required
 def set_manual_portfolio():
     """Permite ingresar posiciones manualmente (sin IBKR)."""
+    user_id = auth.current_user_id()
     body = request.get_json()
     positions = body.get("positions", [])
 
@@ -238,19 +311,20 @@ def set_manual_portfolio():
         },
         "source": "manual"
     }
-    _portfolio_cache["data"] = data
-    _persist_portfolio(data)
+    _portfolio_cache[user_id] = data
+    _persist_portfolio(user_id, data)
     return jsonify(data)
 
 
 @app.route("/api/portfolio/history", methods=["GET"])
+@auth.login_required
 def portfolio_history():
     """Historial de snapshots diarios del portfolio (para gráficos de evolución)."""
     try:
         days = int(request.args.get("days", 90))
     except ValueError:
         days = 90
-    snapshots = db.get_snapshots(days)
+    snapshots = db.get_snapshots(auth.current_user_id(), days)
     return jsonify({"snapshots": snapshots, "count": len(snapshots)})
 
 
@@ -281,11 +355,12 @@ def compare():
     return jsonify(compare_assets(symbols, period))
 
 
-# ── AI Analysis ──────────────────────────────────────────────────────────────
+# ── AI Analysis (público — sin cuenta no hay contexto de portfolio) ──────────
 
 @app.route("/api/analyze/<symbol>")
 def analyze(symbol):
-    portfolio = _portfolio_cache.get("data")
+    user_id = auth.current_user_id()
+    portfolio = _get_cached_portfolio(user_id) if user_id else None
     result = analyze_asset(symbol.upper(), config, portfolio)
     return jsonify(result)
 
@@ -310,7 +385,8 @@ def chat():
     if context_symbol:
         context_symbol = str(context_symbol).strip().upper()[:12]
 
-    portfolio = _portfolio_cache.get("data")
+    user_id = auth.current_user_id()
+    portfolio = _get_cached_portfolio(user_id) if user_id else None
     answer = chat_analysis(question, config, portfolio,
                            history=history, context_symbol=context_symbol)
     return jsonify({"answer": answer})
@@ -331,15 +407,18 @@ def ai_status():
     return jsonify(provider.status())
 
 
-# ── Alerts ───────────────────────────────────────────────────────────────────
+# ── Alerts (privado — requiere cuenta) ───────────────────────────────────────
 
 @app.route("/api/alerts", methods=["GET"])
+@auth.login_required
 def list_alerts():
-    return jsonify(get_alerts())
+    return jsonify(get_alerts(auth.current_user_id()))
 
 
 @app.route("/api/alerts", methods=["POST"])
+@auth.login_required
 def add_alert():
+    user_id = auth.current_user_id()
     body = request.get_json()
     symbol = body.get("symbol", "").upper()
     alert_type = body.get("alert_type", "price")
@@ -354,31 +433,34 @@ def add_alert():
         reference_type = body.get("reference_type", "current")
         if not pct or not reference_price:
             return jsonify({"error": "pct_change y reference_price requeridos"}), 400
-        alert = create_pct_alert(symbol, float(pct), float(reference_price), reference_type, note)
+        alert = create_pct_alert(user_id, symbol, float(pct), float(reference_price), reference_type, note)
     else:
         condition = body.get("condition")
         target_price = body.get("target_price")
         if condition not in ("above", "below") or target_price is None:
             return jsonify({"error": "Parámetros inválidos"}), 400
-        alert = create_alert(symbol, condition, float(target_price), note)
+        alert = create_alert(user_id, symbol, condition, float(target_price), note)
 
     return jsonify(alert), 201
 
 
 @app.route("/api/alerts/<int:alert_id>", methods=["DELETE"])
+@auth.login_required
 def remove_alert(alert_id):
-    success = delete_alert(alert_id)
+    success = delete_alert(auth.current_user_id(), alert_id)
     return jsonify({"success": success})
 
 
 @app.route("/api/alerts/check", methods=["GET"])
+@auth.login_required
 def check():
     """Verifica alertas contra precios actuales de las posiciones en caché.
     Además entrega lo que el scheduler haya disparado desde el último poll."""
+    user_id = auth.current_user_id()
     # Alertas disparadas por el scheduler server-side, pendientes de notificar
-    pending = pop_pending_triggered()
+    pending = pop_pending_triggered(user_id)
 
-    alerts = get_alerts()
+    alerts = get_alerts(user_id)
     active = [a for a in alerts if not a["triggered"]]
     if not active:
         return jsonify(pending)
@@ -391,16 +473,17 @@ def check():
         if "error" not in q:
             prices[sym] = q.get("price", 0)
 
-    triggered = check_alerts(prices)
+    triggered = check_alerts(user_id, prices)
     return jsonify(pending + triggered)
 
 
-# ── Watchlist ────────────────────────────────────────────────────────────────
+# ── Watchlist (privado — requiere cuenta) ────────────────────────────────────
 
 @app.route("/api/watchlist", methods=["GET"])
+@auth.login_required
 def watchlist_list():
     """Watchlist con quote fresco por símbolo (get_quote cachea 120 s)."""
-    items = db.get_watchlist()
+    items = db.get_watchlist(auth.current_user_id())
     for it in items:
         q = get_quote(it["symbol"])
         if "error" in q:
@@ -413,6 +496,7 @@ def watchlist_list():
 
 
 @app.route("/api/watchlist", methods=["POST"])
+@auth.login_required
 def watchlist_add():
     body = request.get_json(silent=True) or {}
     symbol = (body.get("symbol") or "").strip().upper()
@@ -425,76 +509,91 @@ def watchlist_add():
     if "error" in q:
         return jsonify({"error": f"No hay datos para '{symbol}' — verificá el ticker"}), 400
 
-    entry = db.add_to_watchlist(symbol, note)
+    entry = db.add_to_watchlist(auth.current_user_id(), symbol, note)
     return jsonify(entry), 201
 
 
 @app.route("/api/watchlist/<symbol>", methods=["DELETE"])
+@auth.login_required
 def watchlist_remove(symbol):
-    success = db.remove_from_watchlist(symbol.strip().upper())
+    success = db.remove_from_watchlist(auth.current_user_id(), symbol.strip().upper())
     return jsonify({"success": success})
 
 
-# ── Radar de Oportunidades ───────────────────────────────────────────────────
+# ── Radar de Oportunidades (público — la watchlist propia solo se suma con cuenta) ──
 
 @app.route("/api/radar")
 def radar():
     extra = request.args.get("extra", "")
     extra_symbols = [s.strip() for s in extra.split(",") if s.strip()] if extra else []
-    # La watchlist se vigila siempre: se suma a los extras sin duplicar
-    # (radar_scan ya evita duplicar contra el UNIVERSE)
-    for s in db.get_watchlist_symbols():
-        if s not in extra_symbols:
-            extra_symbols.append(s)
+    # Con cuenta, la watchlist propia se vigila siempre: se suma a los extras
+    # sin duplicar (radar_scan ya evita duplicar contra el UNIVERSE). Sin
+    # cuenta, el radar escanea solo el universo compartido + los extras que
+    # el pedido pase explícitamente.
+    user_id = auth.current_user_id()
+    if user_id:
+        for s in db.get_watchlist_symbols(user_id):
+            if s not in extra_symbols:
+                extra_symbols.append(s)
     data = radar_scan(extra_symbols)
     return jsonify(data)
 
 
-# ── Smart Alerts ─────────────────────────────────────────────────────────────
+# ── Smart Alerts (privado — requiere cuenta) ─────────────────────────────────
 
 @app.route("/api/smart-alerts/check")
+@auth.login_required
 def smart_check():
     """Corre el escaneo y retorna oportunidades nuevas."""
-    data = check_opportunities()
+    data = check_opportunities(auth.current_user_id())
     return jsonify(data)
 
 @app.route("/api/smart-alerts/unseen")
+@auth.login_required
 def smart_unseen():
     """Alertas pendientes de ver (para polling ligero)."""
-    return jsonify(get_unseen())
+    return jsonify(get_unseen(auth.current_user_id()))
 
 @app.route("/api/smart-alerts/seen", methods=["POST"])
+@auth.login_required
 def smart_mark_seen():
     body = request.get_json()
-    mark_seen(body.get("ids", []))
+    mark_seen(auth.current_user_id(), body.get("ids", []))
     return jsonify({"ok": True})
 
 @app.route("/api/smart-alerts/history")
+@auth.login_required
 def smart_hist():
-    return jsonify(smart_history())
+    return jsonify(smart_history(auth.current_user_id()))
 
 @app.route("/api/smart-alerts/track-record")
+@auth.login_required
 def smart_track_record():
     """Performance de cada smart alert desde su detección vs SPY (cacheado 15 min)."""
     force = request.args.get("refresh", "false") == "true"
-    return jsonify(get_track_record(force_refresh=force))
+    return jsonify(get_track_record(auth.current_user_id(), force_refresh=force))
 
 @app.route("/api/smart-alerts/config", methods=["GET"])
+@auth.login_required
 def smart_cfg_get():
-    return jsonify(smart_get_config())
+    return jsonify(smart_get_config(auth.current_user_id()))
 
 @app.route("/api/smart-alerts/config", methods=["POST"])
+@auth.login_required
 def smart_cfg_set():
     body = request.get_json()
-    cfg = smart_update_config(body)
+    cfg = smart_update_config(auth.current_user_id(), body)
     return jsonify(cfg)
 
 
-# ── Noticias ─────────────────────────────────────────────────────────────────
+# ── Noticias (público — la personalización solo aplica con cuenta) ──────────
 
-def _portfolio_symbols() -> set:
-    """Símbolos en el portfolio en caché, para resaltar noticias relevantes."""
-    data = _portfolio_cache.get("data") or {}
+def _portfolio_symbols(user_id) -> set:
+    """Símbolos en el portfolio en caché de un usuario, para resaltar noticias
+    relevantes. Sin usuario, conjunto vacío (nada que resaltar)."""
+    if not user_id:
+        return set()
+    data = _get_cached_portfolio(user_id) or {}
     return {p.get("symbol", "").upper() for p in data.get("positions", []) if p.get("symbol")}
 
 
@@ -594,15 +693,20 @@ def get_news():
             if ctx_map:
                 enriched_sections.append(sec)
 
-    port_syms = _portfolio_symbols()
-    watch_syms = {s.upper() for s in db.get_watchlist_symbols()}
+    # Personalización (marcas de portfolio/watchlist, feedback y afinidad):
+    # solo con cuenta. Sin sesión se sirve el pool con el score base, igual
+    # para cualquiera — nada del gusto de un usuario se le impone a otro.
+    user_id = auth.current_user_id()
+    port_syms = _portfolio_symbols(user_id)
+    watch_syms = {s.upper() for s in db.get_watchlist_symbols(user_id)} if user_id else set()
     _mark_symbols(result, port_syms, watch_syms)
-    _apply_feedback_and_affinity(result)
+    _apply_feedback_and_affinity(result, user_id)
     result["_meta"] = {
         "cached": from_cache,
         "age_seconds": age or 0,
         "enriched": do_enrich,
         "enriched_sections": enriched_sections,
+        "personalized": user_id is not None,
     }
     return jsonify(result)
 
@@ -632,15 +736,16 @@ def _mark_symbols(result: dict, port_syms: set, watch_syms: set) -> None:
             it["in_watchlist"] = bool(syms & watch_syms)
 
 
-def _apply_feedback_and_affinity(result: dict) -> None:
+def _apply_feedback_and_affinity(result: dict, user_id) -> None:
     """
-    Mergea el feedback guardado (liked/read, lookup O(1) por url_hash) y
-    calcula relevance_score_personal = relevance_score + affinity_bonus.
+    Mergea el feedback guardado de un usuario (liked/read, lookup O(1) por
+    url_hash) y calcula relevance_score_personal = relevance_score + affinity_bonus.
     El score original NO se pisa: el personal es un campo adicional y cada
     sección se reordena por él. El pool cacheado queda intacto (se cachea
-    limpio antes de este paso).
+    limpio antes de este paso). Sin usuario (anónimo), no hay feedback propio:
+    el score personal queda igual al base y no se aplica bonus de afinidad.
     """
-    fb_map = db.get_news_feedback_map()
+    fb_map = db.get_news_feedback_map(user_id) if user_id else {}
     for section, items in result.items():
         if section.startswith("_"):
             continue
@@ -648,19 +753,20 @@ def _apply_feedback_and_affinity(result: dict) -> None:
             fb = fb_map.get(db.news_url_hash(it.get("url") or ""))
             it["liked"] = bool(fb and fb.get("liked"))
             it["read"] = bool(fb and fb.get("read"))
-            it["relevance_score_personal"] = round(
-                (it.get("relevance_score") or 0) + affinity_bonus(it), 2
-            )
+            bonus = affinity_bonus(it, user_id) if user_id else 0.0
+            it["relevance_score_personal"] = round((it.get("relevance_score") or 0) + bonus, 2)
         items.sort(key=lambda x: x["relevance_score_personal"], reverse=True)
 
 
 @app.route("/api/news/feedback", methods=["POST"])
+@auth.login_required
 def news_feedback_set():
     """
-    Registra feedback sobre una noticia (upsert parcial):
+    Registra feedback del usuario sobre una noticia (upsert parcial):
     body {url, title, section, source, symbols, liked?: bool, read?: bool}.
     Solo pisa los flags presentes en el body. Retorna el estado resultante.
     """
+    user_id = auth.current_user_id()
     body = request.get_json(silent=True) or {}
     url = (body.get("url") or "").strip()
     if not url:
@@ -670,6 +776,7 @@ def news_feedback_set():
         return jsonify({"error": "Mandá al menos 'liked' o 'read'"}), 400
 
     state = db.set_news_feedback(
+        user_id,
         {
             "url": url,
             "title": body.get("title") or "",
@@ -680,16 +787,17 @@ def news_feedback_set():
         liked=bool(liked) if liked is not None else None,
         read=bool(read) if read is not None else None,
     )
-    # El próximo /api/news reconstruye el perfil con este feedback incluido
-    invalidate_profile()
+    # El próximo /api/news reconstruye el perfil de este usuario con el feedback incluido
+    invalidate_profile(user_id)
     return jsonify(state)
 
 
 @app.route("/api/news/feedback/stats")
+@auth.login_required
 def news_feedback_stats():
-    """Agregados del feedback de los últimos 90 días para el tablero:
-    por sección (shown_proxy = likes + reads), top fuentes y símbolos likeados."""
-    rows = db.get_feedback_rows(90)
+    """Agregados del feedback de un usuario en los últimos 90 días para el
+    tablero: por sección (shown_proxy = likes + reads), top fuentes y símbolos likeados."""
+    rows = db.get_feedback_rows(auth.current_user_id(), 90)
     by_section, src_likes, sym_likes = {}, {}, {}
     for r in rows:
         sec = r.get("section") or "SIN_SECCION"

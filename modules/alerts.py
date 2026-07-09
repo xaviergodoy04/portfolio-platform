@@ -1,7 +1,8 @@
 """
 Módulo de alertas de precio.
-Las alertas se persisten en SQLite (data/portfolio.db, tabla `alerts`).
-El JSON legacy (data/alerts.json) se migra automáticamente en db.init_db().
+Las alertas se persisten en SQLite (data/portfolio.db, tabla `alerts`),
+aisladas por user_id. El JSON legacy (data/alerts.json) se migra
+automáticamente en db.init_db() bajo el usuario 1.
 """
 from datetime import datetime
 
@@ -26,17 +27,19 @@ def _row_to_alert(row) -> dict:
     }
 
 
-def get_alerts() -> list:
+def get_alerts(user_id: int) -> list:
     with db.db_conn() as conn:
-        rows = conn.execute("SELECT * FROM alerts ORDER BY id ASC").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM alerts WHERE user_id = ? ORDER BY id ASC", (user_id,)
+        ).fetchall()
     return [_row_to_alert(r) for r in rows]
 
 
-def create_alert(symbol: str, condition: str, target_price: float, note: str = "",
+def create_alert(user_id: int, symbol: str, condition: str, target_price: float, note: str = "",
                  alert_type: str = "price", pct_change: float = None,
                  reference_price: float = None) -> dict:
     """
-    Crea una nueva alerta.
+    Crea una nueva alerta para un usuario.
     alert_type:
       - "price"    : dispara cuando precio cruza target_price (condition: above/below)
       - "pct_drop" : dispara cuando precio baja pct_change% desde reference_price
@@ -58,11 +61,11 @@ def create_alert(symbol: str, condition: str, target_price: float, note: str = "
     with db.db_conn() as conn:
         conn.execute(
             """INSERT INTO alerts
-               (id, symbol, alert_type, condition, target_price, pct_change,
+               (id, user_id, symbol, alert_type, condition, target_price, pct_change,
                 reference_price, note, triggered, triggered_at, triggered_price, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?)""",
             (
-                alert["id"], alert["symbol"], alert["alert_type"], alert["condition"],
+                alert["id"], user_id, alert["symbol"], alert["alert_type"], alert["condition"],
                 alert["target_price"], alert["pct_change"], alert["reference_price"],
                 alert["note"], alert["created_at"],
             ),
@@ -70,7 +73,7 @@ def create_alert(symbol: str, condition: str, target_price: float, note: str = "
     return alert
 
 
-def create_pct_alert(symbol: str, pct: float, reference_price: float,
+def create_pct_alert(user_id: int, symbol: str, pct: float, reference_price: float,
                      reference_type: str = "current", note: str = "") -> dict:
     """
     Crea una alerta de caída porcentual.
@@ -80,6 +83,7 @@ def create_pct_alert(symbol: str, pct: float, reference_price: float,
     label = f"Baja {pct}% desde {'precio actual' if reference_type == 'current' else 'costo promedio'} (ref: ${reference_price:.2f} → objetivo: ${target:.2f})"
     note_full = f"{label}" + (f" — {note}" if note else "")
     return create_alert(
+        user_id=user_id,
         symbol=symbol,
         condition="below",
         target_price=target,
@@ -90,20 +94,25 @@ def create_pct_alert(symbol: str, pct: float, reference_price: float,
     )
 
 
-def delete_alert(alert_id: int) -> bool:
+def delete_alert(user_id: int, alert_id: int) -> bool:
     with db.db_conn() as conn:
-        cur = conn.execute("DELETE FROM alerts WHERE id = ?", (alert_id,))
+        cur = conn.execute(
+            "DELETE FROM alerts WHERE id = ? AND user_id = ?", (alert_id, user_id)
+        )
     return cur.rowcount > 0
 
 
-def check_alerts(current_prices: dict) -> list:
+def check_alerts(user_id: int, current_prices: dict) -> list:
     """
-    Verifica cuáles alertas se dispararon dado un dict {symbol: price}.
-    Retorna lista de alertas disparadas.
+    Verifica cuáles alertas de un usuario se dispararon dado un dict
+    {symbol: price}. Retorna lista de alertas disparadas.
     """
     triggered = []
     with db.db_conn() as conn:
-        rows = conn.execute("SELECT * FROM alerts WHERE triggered = 0 ORDER BY id ASC").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM alerts WHERE user_id = ? AND triggered = 0 ORDER BY id ASC",
+            (user_id,),
+        ).fetchall()
         for row in rows:
             price = current_prices.get(row["symbol"])
             if price is None:

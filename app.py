@@ -365,9 +365,11 @@ def compare():
     return jsonify(compare_assets(symbols, period))
 
 
-# ── AI Analysis (público — sin cuenta no hay contexto de portfolio) ──────────
+# ── AI Analysis (privado — cada llamada al LLM cuesta plata: con la app
+# expuesta a internet vía Funnel/tunnel, sin login sería cuota regalada) ─────
 
 @app.route("/api/analyze/<symbol>")
+@auth.login_required
 def analyze(symbol):
     user_id = auth.current_user_id()
     portfolio = _get_cached_portfolio(user_id) if user_id else None
@@ -376,6 +378,7 @@ def analyze(symbol):
 
 
 @app.route("/api/chat", methods=["POST"])
+@auth.login_required
 def chat():
     body = request.get_json()
     question = body.get("question", "").strip()
@@ -661,6 +664,11 @@ def get_news():
       ?refresh=true       → ignora el cache: re-recolecta y re-enriquece
     """
     do_enrich = request.args.get("enrich", "false") == "true"
+    # El contexto IA cuesta plata por sección generada: solo con cuenta.
+    # Sin sesión se degrada a enrich=false en vez de fallar (el pool de
+    # noticias sigue siendo público).
+    if do_enrich and auth.current_user_id() is None:
+        do_enrich = False
     max_items = int(request.args.get("max", 80))
     force_refresh = request.args.get("refresh", "false") == "true"
     section = (request.args.get("section") or "").strip().upper() or None

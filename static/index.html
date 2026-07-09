@@ -2428,10 +2428,20 @@ function quickAnalyze(symbol) {
 
 async function detailAnalyze() {
   if (!currentDetailSymbol) return;
+  if (!currentUser) {
+    document.getElementById('detail-analysis').innerHTML =
+      loginGateHTML('El análisis con IA requiere una cuenta (cada consulta tiene costo).');
+    return;
+  }
   document.getElementById('detail-analysis-loading').style.display = 'flex';
   document.getElementById('detail-analysis').innerHTML = '';
   try {
     const resp = await fetch(`/api/analyze/${currentDetailSymbol}`);
+    if (resp.status === 401) {
+      currentUser = null; renderAccountControl();
+      document.getElementById('detail-analysis-loading').style.display = 'none';
+      return detailAnalyze();
+    }
     const data = await resp.json();
     document.getElementById('detail-analysis-loading').style.display = 'none';
     renderAnalysis(data, 'detail-analysis');
@@ -3941,6 +3951,14 @@ async function sendChat() {
   if (!question) return;
 
   const messages = document.getElementById('chat-messages');
+  if (!currentUser) {
+    messages.innerHTML += `<div class="chat-message chat-ai"><div class="chat-bubble">
+      🔒 El chat IA requiere una cuenta (cada consulta tiene costo).<br>
+      <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="openLoginModal()">🔑 Iniciar sesión</button>
+    </div></div>`;
+    messages.scrollTop = messages.scrollHeight;
+    return;
+  }
   messages.innerHTML += `<div class="chat-message chat-user"><div class="chat-bubble">${question}</div></div>`;
   messages.innerHTML += `<div id="chat-loading" class="chat-message chat-ai"><div class="chat-bubble"><div class="spinner"></div></div></div>`;
   messages.scrollTop = messages.scrollHeight;

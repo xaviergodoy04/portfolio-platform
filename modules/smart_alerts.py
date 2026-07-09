@@ -1,8 +1,9 @@
 """
 Smart Alerts — detecta automáticamente activos con alto potencial
 que alcanzan un buen punto de entrada técnico.
-Persistencia en SQLite (tablas `smart_alerts` y `smart_config`).
-Los JSON legacy se migran automáticamente en db.init_db().
+Persistencia en SQLite (tablas `smart_alerts` y `smart_config`), aisladas
+por user_id. Los JSON legacy se migran automáticamente en db.init_db()
+bajo el usuario 1.
 """
 import json
 from datetime import datetime
@@ -21,9 +22,11 @@ DEFAULT_CONFIG = {
 }
 
 
-def _load_config() -> dict:
+def _load_config(user_id: int) -> dict:
     with db.db_conn() as conn:
-        rows = conn.execute("SELECT key, value_json FROM smart_config").fetchall()
+        rows = conn.execute(
+            "SELECT key, value_json FROM smart_config WHERE user_id = ?", (user_id,)
+        ).fetchall()
     stored = {}
     for r in rows:
         try:
@@ -33,24 +36,24 @@ def _load_config() -> dict:
     return {**DEFAULT_CONFIG, **stored}
 
 
-def _save_config(cfg: dict):
+def _save_config(user_id: int, cfg: dict):
     with db.db_conn() as conn:
         for k, v in cfg.items():
             conn.execute(
-                """INSERT INTO smart_config (key, value_json) VALUES (?, ?)
-                   ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json""",
-                (k, json.dumps(v)),
+                """INSERT INTO smart_config (user_id, key, value_json) VALUES (?, ?, ?)
+                   ON CONFLICT(user_id, key) DO UPDATE SET value_json = excluded.value_json""",
+                (user_id, k, json.dumps(v)),
             )
 
 
-def get_config() -> dict:
-    return _load_config()
+def get_config(user_id: int) -> dict:
+    return _load_config(user_id)
 
 
-def update_config(updates: dict) -> dict:
-    cfg = _load_config()
+def update_config(user_id: int, updates: dict) -> dict:
+    cfg = _load_config(user_id)
     cfg.update(updates)
-    _save_config(cfg)
+    _save_config(user_id, cfg)
     return cfg
 
 
@@ -67,14 +70,14 @@ def _row_to_entry(row) -> dict:
     return entry
 
 
-def _insert_entry(conn, entry: dict):
+def _insert_entry(conn, user_id: int, entry: dict):
     conn.execute(
         """INSERT OR REPLACE INTO smart_alerts
-           (id, symbol, detected_at, price_at_detection, entry_score,
+           (id, user_id, symbol, detected_at, price_at_detection, entry_score,
             growth_score, risk_score, seen, payload_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
-            entry["id"], entry["symbol"], entry.get("detected_at"),
+            entry["id"], user_id, entry["symbol"], entry.get("detected_at"),
             entry.get("current_price"), entry.get("entry_score"),
             entry.get("growth_score"), entry.get("risk_score"),
             1 if entry.get("seen") else 0, json.dumps(entry),
@@ -82,17 +85,18 @@ def _insert_entry(conn, entry: dict):
     )
 
 
-def _make_id(symbol: str) -> str:
-    """ID único por símbolo + día, para no notificar el mismo activo más de una vez por día."""
-    return f"{symbol}_{datetime.now().strftime('%Y-%m-%d')}"
+def _make_id(user_id: int, symbol: str) -> str:
+    """ID único por usuario + símbolo + día — dos usuarios con el mismo
+    símbolo el mismo día no se pisan la entrada (bug real antes de user_id)."""
+    return f"{user_id}_{symbol}_{datetime.now().strftime('%Y-%m-%d')}"
 
 
-def check_opportunities() -> dict:
+def check_opportunities(user_id: int) -> dict:
     """
-    Escanea el mercado y retorna activos que cumplen los umbrales.
-    Solo notifica activos que no fueron notificados hoy.
+    Escanea el mercado y retorna activos que cumplen los umbrales de un usuario.
+    Solo notifica activos que no fueron notificados hoy a ESE usuario.
     """
-    cfg = _load_config()
+    cfg = _load_config(user_id)
 
     if not cfg.get("enabled"):
         return {"triggered": [], "scanned": 0, "config": cfg}
@@ -104,7 +108,7 @@ def check_opportunities() -> dict:
     # Las señales automáticas también vigilan la watchlist del usuario
     # (dedupe preservando el orden; scan() ya evita duplicar contra el universo)
     extra = list(dict.fromkeys(
-        [str(s).strip().upper() for s in [*extra, *db.get_watchlist_symbols()] if str(s).strip()]
+        [str(s).strip().upper() for s in [*extra, *db.get_watchlist_symbols(user_id)] if str(s).strip()]
     ))
 
     # Escanear solo los símbolos del universo + extras (no hacer full scan siempre)
@@ -112,12 +116,16 @@ def check_opportunities() -> dict:
     results = data.get("results", [])
 
     with db.db_conn() as conn:
-        seen_ids = {r["id"] for r in conn.execute("SELECT id FROM smart_alerts").fetchall()}
+        seen_ids = {
+            r["id"] for r in conn.execute(
+                "SELECT id FROM smart_alerts WHERE user_id = ?", (user_id,)
+            ).fetchall()
+        }
 
     triggered = []
     for r in results:
         if r.get("growth_score", 0) >= min_growth and r.get("entry_score", 0) >= min_entry:
-            alert_id = _make_id(r["symbol"])
+            alert_id = _make_id(user_id, r["symbol"])
             if alert_id in seen_ids:
                 continue  # ya notificado hoy
 
@@ -146,7 +154,7 @@ def check_opportunities() -> dict:
     if triggered:
         with db.db_conn() as conn:
             for entry in triggered:
-                _insert_entry(conn, entry)
+                _insert_entry(conn, user_id, entry)
 
     return {
         "triggered": triggered,
@@ -156,28 +164,31 @@ def check_opportunities() -> dict:
     }
 
 
-def get_unseen() -> list:
-    """Retorna alertas no vistas todavía."""
+def get_unseen(user_id: int) -> list:
+    """Retorna alertas no vistas todavía de un usuario."""
     with db.db_conn() as conn:
-        rows = conn.execute("SELECT * FROM smart_alerts WHERE seen = 0").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM smart_alerts WHERE user_id = ? AND seen = 0", (user_id,)
+        ).fetchall()
     return [_row_to_entry(r) for r in rows]
 
 
-def mark_seen(alert_ids: list):
-    """Marca alertas como vistas."""
+def mark_seen(user_id: int, alert_ids: list):
+    """Marca alertas de un usuario como vistas."""
     if not alert_ids:
         return
     placeholders = ",".join("?" for _ in alert_ids)
     with db.db_conn() as conn:
         conn.execute(
-            f"UPDATE smart_alerts SET seen = 1 WHERE id IN ({placeholders})",
-            list(alert_ids),
+            f"UPDATE smart_alerts SET seen = 1 WHERE user_id = ? AND id IN ({placeholders})",
+            [user_id, *alert_ids],
         )
 
 
-def get_history(limit: int = 50) -> list:
+def get_history(user_id: int, limit: int = 50) -> list:
     with db.db_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM smart_alerts ORDER BY detected_at DESC LIMIT ?", (limit,)
+            "SELECT * FROM smart_alerts WHERE user_id = ? ORDER BY detected_at DESC LIMIT ?",
+            (user_id, limit),
         ).fetchall()
     return [_row_to_entry(r) for r in rows]

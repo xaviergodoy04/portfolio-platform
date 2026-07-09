@@ -10,10 +10,17 @@ Además, si el servicio está ocupado / rate-limited, el propio SendRequest pued
 devolver el error 1001 "Statement could not be generated at this time" — que es
 TRANSITORIO. Por eso reintentamos ambos pasos con backoff.
 """
+import os
 import requests
 import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
+
+# Último XML crudo recibido de IBKR, para diagnosticar qué devuelve la Flex
+# Query cuando las posiciones no aparecen como se espera (gitignored)
+LAST_REPORT_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "data", "last_flex_report.xml"
+)
 
 
 FLEX_URL = "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest"
@@ -94,25 +101,50 @@ def fetch_flex_report(token: str, query_id: str) -> dict:
 
 def parse_flex_xml(xml_text: str) -> dict:
     """Parsea el XML del Flex Report y extrae posiciones."""
+    # Guardar el crudo para poder diagnosticar (best effort, jamás rompe el parseo)
+    try:
+        with open(LAST_REPORT_PATH, "w") as f:
+            f.write(xml_text)
+    except OSError:
+        pass
+
     try:
         root = ET.fromstring(xml_text)
-        positions = []
+        rows = root.findall(".//OpenPosition")
 
-        for pos in root.findall(".//OpenPosition"):
+        # Si la query viene con detalle por lote, IBKR manda una fila SUMMARY
+        # por símbolo + una fila LOT por cada compra: sin este filtro las
+        # posiciones se duplican (o triplican) en el portfolio.
+        summary_rows = [p for p in rows if p.get("levelOfDetail", "").upper() == "SUMMARY"]
+        if summary_rows:
+            rows = summary_rows
+
+        positions = []
+        for pos in rows:
             symbol = pos.get("symbol", "")
             if not symbol:
                 continue
 
+            quantity = float(pos.get("position", 0))
+            if quantity == 0:
+                continue  # posición cerrada/flat: no es parte del portfolio actual
+
             positions.append({
                 "symbol": symbol,
                 "asset_class": pos.get("assetClass", "STK"),
-                "quantity": float(pos.get("position", 0)),
+                "quantity": quantity,
                 "avg_cost": float(pos.get("costBasisPrice", 0)),
                 "mark_price": float(pos.get("markPrice", 0)),
                 "position_value": float(pos.get("positionValue", 0)),
                 "unrealized_pnl": float(pos.get("unrealizedPnL", 0)),
                 "currency": pos.get("currency", "USD"),
             })
+
+        if rows and not positions:
+            return {"error": "IBKR respondió, pero todas las posiciones vienen con cantidad 0 "
+                             "(¿cuenta sin posiciones abiertas, o la Flex Query apunta a un "
+                             "período/cuenta equivocado?). El XML crudo quedó en "
+                             "data/last_flex_report.xml para revisarlo."}
 
         # Calcular métricas del portfolio
         total_value = sum(p["position_value"] for p in positions)
